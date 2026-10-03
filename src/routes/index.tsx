@@ -266,7 +266,10 @@ function Home() {
                 <p className="kicker">{PUBLIC_SITE}</p>
                 <h1>Mount Dew</h1>
                 <p className="lede">One desert. Three flags. A hill that pays if you hold it. The match stays up, and you can drop in from this page.</p>
-                <img className="cover" src="/og.jpg" alt="Mount Dew app cover" />
+                <div className="posters">
+                  <img className="cover" src="/og.jpg" alt="Mount Dew app cover" />
+                  <img className="cast" src="/game/cast.jpg" alt="Seraph Doll, Bluebelle, Noir Nyx, and Bestie Bea in the desert" />
+                </div>
                 <p className="handle">@sugoimeg</p>
                 <div className="servers" aria-label="Match servers">
                   <p className="kicker">Match servers</p>
@@ -289,16 +292,21 @@ function Home() {
                     </button>
                   ))}
                 </div>
-                <div className="chars" aria-label="Pilots">
+                <div className="pilot-grid" role="listbox" aria-label="Pilots">
                   {CHARACTERS.map((c) => (
-                    <button key={c.id} className={charId === c.id ? "choice on" : "choice"} onClick={() => setCharId(c.id)} type="button">
-                      <span className="swatch" style={{ background: `#${c.hair.toString(16).padStart(6, "0")}` }} />
-                      {c.name}
-                      <small>{c.abilityName}</small>
+                    <button key={c.id} className={charId === c.id ? "pilot on" : "pilot"} onClick={() => setCharId(c.id)} type="button" aria-pressed={charId === c.id}>
+                      <img src={`/game/pilots/${c.id}.jpg`} alt="" />
+                      <span>{c.name}</span>
                     </button>
                   ))}
                 </div>
-                <p className="muted">{CHARACTERS.find((c) => c.id === charId)?.blurb}</p>
+                <div className="pilot-pick">
+                  <img src={`/game/pilots/${charId}.jpg`} alt="" />
+                  <div>
+                    <strong>{CHARACTERS.find((c) => c.id === charId)?.name}</strong>
+                    <p className="muted">{CHARACTERS.find((c) => c.id === charId)?.blurb}</p>
+                  </div>
+                </div>
                 <label className="field">
                   Nickname
                   <input id="nick" autoComplete="username" value={nick} onChange={(e) => setNick(e.target.value)} maxLength={16} suppressHydrationWarning />
@@ -644,7 +652,10 @@ function Home() {
               ) : null}
               {tab === "about" ? (
                 <div>
-                  <img className="cover" src="/og.jpg" alt="Mount Dew app cover" />
+                  <div className="posters">
+                    <img className="cover" src="/og.jpg" alt="Mount Dew app cover" />
+                    <img className="cast" src="/game/cast.jpg" alt="Seraph Doll, Bluebelle, Noir Nyx, and Bestie Bea in the desert" />
+                  </div>
                   <p className="handle">@sugoimeg</p>
                   <p className="muted">
                     Mount Dew is a nonstop three-team capture match. Citrus holds the white stone and the coconut desert, Voltage the space decks, Code Red the red stone city. The hill in the middle pays a speed surge if a team keeps it for two minutes. Rise rites pull green mutants out of fallen bodies. An announcer calls the flags and a commentator talks over the nearby fight. Fly the spectator camera and the field goes quiet as you leave it. The match PC can host a thousand pilots in one room. Your nickname stays in this browser. Rank and score updates go through the relay so a refreshed page cannot invent them.
