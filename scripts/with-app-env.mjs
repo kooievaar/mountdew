@@ -20,7 +20,7 @@
  * `process.env`, which is why the merge has to happen before Vite starts.
  */
 import { spawn } from "node:child_process";
-import { readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { constants as osConstants } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -104,6 +104,25 @@ export function isMainModule(moduleUrl) {
   }
 }
 
+function localBinScript(command) {
+  // Windows `spawn("vite")` is ENOENT: npm's shim is vite.cmd, and spawn does
+  // not apply PATHEXT. Run the package's own JS bin with this node instead.
+  if (!command || command.includes("/") || command.includes("\\")) return null;
+  const pkgFile = join(projectRoot(), "node_modules", command, "package.json");
+  if (!existsSync(pkgFile)) return null;
+  let pkg;
+  try {
+    pkg = JSON.parse(readFileSync(pkgFile, "utf8"));
+  } catch {
+    return null;
+  }
+  const bin = pkg.bin;
+  const rel = typeof bin === "string" ? bin : bin && (bin[command] || Object.values(bin)[0]);
+  if (typeof rel !== "string") return null;
+  const script = join(projectRoot(), "node_modules", command, rel);
+  return existsSync(script) ? script : null;
+}
+
 function main(argv) {
   const [command, ...args] = argv;
   if (!command) {
@@ -111,7 +130,10 @@ function main(argv) {
     process.exit(2);
   }
   const env = mergeAppEnv(readAppEnv(projectRoot()), process.env);
-  const child = spawn(command, args, { stdio: "inherit", env });
+  const script = localBinScript(command);
+  const child = script
+    ? spawn(process.execPath, [script, ...args], { stdio: "inherit", env })
+    : spawn(command, args, { stdio: "inherit", env });
   // The dev server is long-running and is stopped by signalling this wrapper.
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
     process.on(signal, () => child.kill(signal));

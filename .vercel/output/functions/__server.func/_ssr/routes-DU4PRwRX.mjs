@@ -2,7 +2,7 @@ import { i as __toESM } from "../_runtime.mjs";
 import { b as require_jsx_runtime, q as require_react } from "../_libs/@tanstack/react-router+[...].mjs";
 import { n as TSS_SERVER_FUNCTION, r as getServerFnById, t as createServerFn } from "./ssr.mjs";
 import { a as Maximize2, c as Eye, i as Settings, o as Map$1, r as Terminal, s as List, t as X } from "../_libs/lucide-react.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/routes-YLV7z2gV.js
+//#region node_modules/.nitro/vite/services/ssr/assets/routes-DU4PRwRX.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var __defProp = Object.defineProperty;
@@ -895,14 +895,14 @@ function Home() {
 			if (savedRelay) setRelay(savedRelay);
 			else if (window.location.hostname === "newsfeed.qzz.io") setRelay(`wss://${window.location.host}`);
 		} catch {}
-		fetch("/health").then((res) => res.ok ? res.json() : null).then((body) => {
+		if (window.location.port === "8888" || window.location.hostname === "newsfeed.qzz.io") fetch("/health").then((res) => res.ok ? res.json() : null).then((body) => {
 			if (body && typeof body.pilots === "number") setPilots(body.pilots);
 		}).catch(() => {});
 		fetchBoard().then(setBoard).catch(() => setError("Relay quiet. You can still drop in locally."));
 		let dead = false;
 		let stop = () => {};
 		(async () => {
-			const mod = await import("./engine-bxOYh30I.mjs");
+			const mod = await import("./engine-D-qJWicd.mjs");
 			if (dead || !viewRef.current || !overlayRef.current) return;
 			const qa = new URLSearchParams(window.location.search).has("qa");
 			const game = mod.createGame(viewRef.current, overlayRef.current, { qa });
