@@ -17,11 +17,13 @@ export type AudioBus = {
   splashAt: (x: number, y: number, z: number) => void;
   laugh: () => void;
   laughAt: (x: number, y: number, z: number) => void;
+  giggle: (x: number, y: number, z: number) => void;
   train: () => void;
   trainAt: (x: number, y: number, z: number) => void;
   stinger: () => void;
   announce: (text: string) => void;
   comment: (text: string) => void;
+  intro: () => void;
   weather: (kind: string) => void;
   owl: () => void;
   birds: () => void;
@@ -35,14 +37,20 @@ const HEAR_FULL = 7;
 export function createAudio(): AudioBus {
   let ctx: AudioContext | null = null;
   let master: GainNode | null = null;
+  let sfxBus: GainNode | null = null;
+  let voiceBus: GainNode | null = null;
+  let boothBus: GainNode | null = null;
+  let noiseBuf: AudioBuffer | null = null;
   let vol = 0.7;
   let wind: AudioBufferSourceNode | null = null;
   let stepAcc = 0;
   let laughAcc = 0;
   const ear = { x: 0, y: 8, z: 0 };
   let pilotVoices = 0;
+  let giggleOn = 0;
   let shotVoices = 0;
   let boomVoices = 0;
+  let introDone = false;
   let boothUntil = 0;
   const boothQueue: { text: string; form: "booth" | "color" }[] = [];
 
@@ -53,6 +61,15 @@ export function createAudio(): AudioBus {
       master = ctx.createGain();
       master.gain.value = vol;
       master.connect(ctx.destination);
+      sfxBus = ctx.createGain();
+      sfxBus.gain.value = 0.8;
+      sfxBus.connect(master);
+      voiceBus = ctx.createGain();
+      voiceBus.gain.value = 1;
+      voiceBus.connect(master);
+      boothBus = ctx.createGain();
+      boothBus.gain.value = 1;
+      boothBus.connect(master);
       const len = ctx.sampleRate * 2;
       const buf = ctx.createBuffer(1, len, ctx.sampleRate);
       const data = buf.getChannelData(0);
@@ -75,23 +92,23 @@ export function createAudio(): AudioBus {
     return ctx;
   }
 
-  function envGain(duration: number, peak: number) {
+  function envGain(duration: number, peak: number, bus?: GainNode | null) {
     const c = ac();
     const g = c.createGain();
-    g.connect(master!);
+    g.connect(bus || sfxBus || master!);
     const t = c.currentTime;
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(Math.max(0.001, peak), t + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.001, peak), t + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + Math.max(0.04, duration));
     return { c, g, t };
   }
 
-  function tone(freq: number, dur: number, type: OscillatorType, peak: number, slide = 0) {
+  function tone(freq: number, dur: number, type: OscillatorType, peak: number, slide = 0, bus?: GainNode | null) {
     if (peak < 0.004) return;
-    const { c, g, t } = envGain(dur, peak);
+    const { c, g, t } = envGain(dur, peak, bus);
     const o = c.createOscillator();
     o.type = type;
-    o.frequency.setValueAtTime(freq, t);
+    o.frequency.setValueAtTime(Math.max(40, freq), t);
     if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, freq + slide), t + dur);
     o.connect(g);
     o.start(t);
@@ -101,20 +118,24 @@ export function createAudio(): AudioBus {
   function noise(dur: number, peak: number, freq: number) {
     if (peak < 0.004) return;
     const c = ac();
-    const len = Math.max(1, Math.floor(c.sampleRate * dur));
-    const buf = c.createBuffer(1, len, c.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    if (!noiseBuf) {
+      noiseBuf = c.createBuffer(1, c.sampleRate, c.sampleRate);
+      const data = noiseBuf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    }
     const src = c.createBufferSource();
-    src.buffer = buf;
+    src.buffer = noiseBuf;
+    src.loop = true;
     const filter = c.createBiquadFilter();
     filter.type = "bandpass";
     filter.frequency.value = freq;
-    filter.Q.value = 0.7;
-    const { g } = envGain(dur, peak);
+    filter.Q.value = 0.8;
+    const { g, t } = envGain(dur, peak, sfxBus);
     src.connect(filter);
     filter.connect(g);
-    src.start();
+    const offset = Math.random() * Math.max(0, noiseBuf.duration - dur);
+    src.start(t, offset);
+    src.stop(t + dur + 0.02);
   }
 
   function sequence(notes: number[], step: number, type: OscillatorType, peak: number) {
@@ -143,39 +164,61 @@ export function createAudio(): AudioBus {
   function talk(text: string, pitch: number, peak: number, form: "pilot" | "booth" | "color") {
     const words = text
       .toLowerCase()
-      .replace(/[^a-z ]/g, "")
+      .replace(/[^a-z0-9 ]/g, "")
       .split(/\s+/)
       .filter(Boolean)
-      .slice(0, 5);
+      .slice(0, 18);
     if (!words.length || peak < 0.004) return 80;
-    const gap = form === "color" ? 0.075 : form === "booth" ? 0.12 : 0.09;
-    const type: OscillatorType = form === "booth" ? "sawtooth" : form === "color" ? "triangle" : "square";
-    const base = form === "booth" ? pitch * 0.62 : form === "color" ? pitch * 1.05 : pitch;
+    const bus = form === "pilot" ? voiceBus : boothBus;
+    const gap = form === "color" ? 0.11 : form === "booth" ? 0.15 : 0.12;
+    const type: OscillatorType = form === "booth" ? "triangle" : "sine";
+    const base = form === "booth" ? Math.max(150, pitch) : form === "color" ? pitch : pitch;
+    const c = ac();
+    const start = c.currentTime + 0.03;
     let n = 0;
     words.forEach((word, wi) => {
-      const syl = Math.min(3, Math.max(1, Math.round(word.length / 2)));
+      const syl = Math.min(4, Math.max(1, Math.ceil(word.length / 3)));
       for (let i = 0; i < syl; i++) {
-        const ch = word[Math.min(word.length - 1, i * 2)] || "a";
-        const vowel = ch === "i" || ch === "e" ? 1.45 : ch === "o" || ch === "u" ? 0.72 : ch === "a" ? 1.05 : 0.9;
-        const when = (n + wi * 0.15) * gap;
-        const f = Math.max(70, base * vowel);
-        window.setTimeout(() => {
-          tone(f, gap * 0.92, type, peak, form === "pilot" ? f * 0.08 : -f * 0.06);
-          tone(f * 2.1, gap * 0.7, "sine", peak * 0.35);
-        }, when * 1000);
+        const ch = word[Math.min(word.length - 1, i)] || "a";
+        const vowel = ch === "i" || ch === "e" ? 1.35 : ch === "o" || ch === "u" ? 0.78 : ch === "a" ? 1.08 : 0.95;
+        const when = start + (n + wi * 0.2) * gap;
+        const f = Math.max(80, base * vowel);
+        const dur = gap * 0.92;
+        const g = c.createGain();
+        g.connect(bus || master!);
+        g.gain.setValueAtTime(0.0001, when);
+        g.gain.exponentialRampToValueAtTime(Math.max(0.001, peak), when + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+        const o = c.createOscillator();
+        o.type = type;
+        o.frequency.setValueAtTime(f, when);
+        o.frequency.exponentialRampToValueAtTime(Math.max(70, f * (form === "pilot" ? 1.06 : 0.94)), when + dur);
+        o.connect(g);
+        o.start(when);
+        o.stop(when + dur + 0.02);
+        const h = c.createOscillator();
+        const hg = c.createGain();
+        hg.connect(bus || master!);
+        hg.gain.setValueAtTime(0.0001, when);
+        hg.gain.exponentialRampToValueAtTime(Math.max(0.001, peak * 0.28), when + 0.02);
+        hg.gain.exponentialRampToValueAtTime(0.0001, when + dur * 0.8);
+        h.type = "sine";
+        h.frequency.setValueAtTime(f * 2, when);
+        h.connect(hg);
+        h.start(when);
+        h.stop(when + dur);
         n++;
       }
     });
-    return Math.max(180, n * gap * 1000 + 40);
+    return Math.max(280, (n + words.length * 0.2) * gap * 1000 + 80);
   }
 
   function playBooth(text: string, form: "booth" | "color") {
-    const g = boothGain();
-    if (g < 0.05) return;
-    const pitch = form === "booth" ? 196 : 280;
-    const ms = talk(text, pitch, (form === "booth" ? 0.11 : 0.08) * g, form);
-    boothUntil = performance.now() + ms + 280;
-    window.setTimeout(flushBooth, ms + 280);
+    const g = form === "booth" ? Math.max(0.75, boothGain()) : Math.max(0.4, boothGain());
+    const pitch = form === "booth" ? 210 : 320;
+    const ms = talk(text, pitch, (form === "booth" ? 0.14 : 0.1) * g, form);
+    boothUntil = performance.now() + ms + 180;
+    window.setTimeout(flushBooth, ms + 180);
   }
 
   function flushBooth() {
@@ -187,30 +230,11 @@ export function createAudio(): AudioBus {
   function queueBooth(text: string, form: "booth" | "color") {
     if (!text) return;
     if (performance.now() >= boothUntil && boothQueue.length === 0) playBooth(text, form);
-    else if (boothQueue.length < 2) boothQueue.push({ text, form });
+    else if (boothQueue.length < 8) boothQueue.push({ text, form });
   }
 
   function announceLine(text: string) {
-    const s = text.toLowerCase();
-    if (s.includes("godmode") || s.includes("god mode")) return "god mode";
-    if (s.includes("double penta")) return "double penta kill";
-    if (s.includes("penta")) return "penta kill";
-    if (s.includes("quadruple")) return "quadruple kill";
-    if (s.includes("triple kill")) return "triple kill";
-    if (s.includes("double kill")) return "double kill";
-    if (s.includes("headshot")) return "headshot";
-    if (s.includes("joined")) return "new pilot";
-    if (s.includes("instructor") && s.includes("hill")) return "hold the center hill";
-    if (s.includes("instructor")) return "capture the flag";
-    if (s.includes("dropped") || s.startsWith("kill ")) return "pilot down";
-    if (s.includes("captured")) return "flag captured";
-    if (s.includes("took")) return "flag taken";
-    if (s.includes("returned")) return "flag returned";
-    if (s.includes("surge")) return "speed surge";
-    if (s.includes("holds the hill")) return "hill secured";
-    if (s.includes("revived")) return "pilot revived";
-    if (s.includes("mutant") || s.includes("raised")) return "mutant risen";
-    return "";
+    return text.replace(/\s+/g, " ").trim().slice(0, 180);
   }
 
   function shotBody(kind: string, peak: number) {
@@ -246,7 +270,7 @@ export function createAudio(): AudioBus {
     shotAt(x: number, y: number, z: number, kind: string, self: boolean) {
       const g = self ? Math.max(0.9, distGain(x, y, z, 36)) : distGain(x, y, z, 36);
       if (g < 0.05) return;
-      if (!self && shotVoices >= 3) return;
+      if (!self && shotVoices >= 8) return;
       shotVoices++;
       window.setTimeout(() => {
         shotVoices = Math.max(0, shotVoices - 1);
@@ -278,10 +302,10 @@ export function createAudio(): AudioBus {
     voiceAt(x: number, y: number, z: number, pitch: number, kind: string, line: string, self: boolean) {
       const g = self ? 1 : distGain(x, y, z, 24);
       if (g < 0.08) return;
-      if (!self && pilotVoices >= 2) return;
+      if (!self && pilotVoices >= 4) return;
       pilotVoices++;
       const phrase = line || kind || "hey";
-      const ms = talk(phrase, Math.max(90, pitch), 0.13 * g, "pilot");
+      const ms = talk(phrase, Math.max(90, pitch), 0.16 * g, "pilot");
       window.setTimeout(() => {
         pilotVoices = Math.max(0, pilotVoices - 1);
       }, ms);
@@ -291,7 +315,7 @@ export function createAudio(): AudioBus {
     },
     helpAt(x: number, y: number, z: number, pitch: number, self: boolean) {
       const g = self ? 1 : distGain(x, y, z, 22);
-      if (g < 0.08 || (!self && pilotVoices >= 2)) return;
+      if (g < 0.08 || (!self && pilotVoices >= 4)) return;
       pilotVoices++;
       const ms = talk("help", Math.max(90, pitch), 0.12 * g, "pilot");
       window.setTimeout(() => {
@@ -314,6 +338,15 @@ export function createAudio(): AudioBus {
       if (g < 0.05) return;
       tone(500 + Math.random() * 200, 0.1, "square", 0.045 * g, 80);
     },
+    giggle(x: number, y: number, z: number) {
+      const g = distGain(x, y, z, 26);
+      if (g < 0.05 || giggleOn >= 2) return;
+      giggleOn++;
+      const ms = talk("Hahaha Hihihi Hahaha", 620, 0.18 * g, "pilot");
+      window.setTimeout(() => {
+        giggleOn = Math.max(0, giggleOn - 1);
+      }, ms);
+    },
     train() {
       noise(0.16, 0.05, 120);
       tone(440, 0.2, "triangle", 0.03);
@@ -330,11 +363,25 @@ export function createAudio(): AudioBus {
     announce(text: string) {
       const line = announceLine(text);
       if (!line) return;
-      tone(220, 0.08, "triangle", 0.04 * boothGain());
       queueBooth(line, "booth");
     },
+    intro() {
+      const c = ac();
+      const speak = () => {
+        if (introDone) return;
+        introDone = true;
+        const roll = Math.floor(Math.random() * 3);
+        const pitch = roll === 0 ? 96 : roll === 1 ? 230 : 410;
+        const form = roll === 0 ? "booth" : roll === 1 ? "color" : "pilot";
+        talk("Mount Dew Ow yes", pitch, 0.22, form);
+      };
+      if (c.state !== "running") {
+        void c.resume().then(speak);
+        return;
+      }
+      speak();
+    },
     comment(text: string) {
-      if (performance.now() < boothUntil) return;
       queueBooth(text, "color");
     },
     weather(kind: string) {

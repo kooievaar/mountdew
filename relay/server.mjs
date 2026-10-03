@@ -23,6 +23,7 @@ const dataFile = pathJoin(here, "data.json");
 const accounts = new Map();
 const sessions = new Map();
 const humans = new Map();
+const liveSock = new Map();
 const upgraded = new WeakSet();
 let shots = [];
 let shotSeq = 1;
@@ -67,15 +68,48 @@ async function save() {
 }
 
 function humansNow(now) {
-  if (now - snapAt < 50 && snapCount === humans.size && snapHumans.length) return snapHumans;
   for (const [key, human] of humans) {
-    if (now - human.at > 8000) humans.delete(key);
+    const sock = liveSock.get(key);
+    const open = sock && !sock.destroyed && !sock.writableEnded;
+    if (!open && now - human.at > 12000) {
+      humans.delete(key);
+      if (liveSock.get(key) === sock) liveSock.delete(key);
+    }
   }
   snapHumans = [];
   for (const human of humans.values()) snapHumans.push(human);
   snapAt = now;
   snapCount = humans.size;
   return snapHumans;
+}
+
+function rosterList() {
+  const now = Date.now();
+  const rows = [];
+  for (const human of humansNow(now)) {
+    const acc = accounts.get(String(human.nick || "").toLowerCase());
+    rows.push({
+      nick: human.nick,
+      team: human.team,
+      charId: human.charId,
+      x: human.x,
+      y: human.y,
+      z: human.z,
+      yaw: human.yaw,
+      hp: human.hp,
+      lvl: human.lvl,
+      kills: acc?.kills || 0,
+      deaths: acc?.deaths || 0,
+      xp: acc?.xp || 0,
+      caps: acc?.caps || 0,
+      ping: acc?.pingPub || 0,
+    });
+  }
+  return rows;
+}
+
+function broadcastRoster() {
+  fanout(JSON.stringify({ op: "roster", pilots: rosterList() }));
 }
 
 function joinPilot(msg) {
@@ -104,6 +138,7 @@ function joinPilot(msg) {
       windowStart: Date.now(),
       xpWindow: 0,
       kWindow: 0,
+      returns: false,
     };
     accounts.set(key, acc);
   } else if (!same(hashPass(password, acc.salt), acc.pass)) {
@@ -112,12 +147,10 @@ function joinPilot(msg) {
     acc.team = team;
     acc.charId = charId;
   }
+  for (const [tok, k] of sessions) if (k === key) sessions.delete(tok);
   const token = randomBytes(18).toString("hex");
   sessions.set(token, key);
-  const board = [...accounts.values()]
-    .map((row) => ({ nick: row.nick, xp: row.xp, kills: row.kills, deaths: row.deaths, caps: row.caps, team: row.team }))
-    .sort((a, b) => b.xp - a.xp)
-    .slice(0, 24);
+  const board = rosterList();
   console.log(`joined ${acc.nick}  (${sessions.size} sessions, ${humans.size} live)`);
   return {
     ok: true,
@@ -137,6 +170,10 @@ function pulse(msg) {
     return { ok: true, xp: acc.xp, kills: acc.kills, deaths: acc.deaths, caps: acc.caps, humans: humansNow(now).filter((h) => h.nick !== acc.nick), shots: [], serverNow: now };
   }
   acc.lastPulse = now;
+  if (!msg.fix) {
+    acc.lastActive = now;
+    acc.idleStrikes = 0;
+  }
   if (now - acc.windowStart > 10000) {
     acc.windowStart = now;
     acc.xpWindow = 0;
@@ -186,6 +223,113 @@ function pulse(msg) {
   const list = humansNow(now).filter((human) => human.nick !== acc.nick);
   const mine = shots.filter((row) => row.nick !== acc.nick && now - row.at < 1200);
   return { ok: true, xp: acc.xp, kills: acc.kills, deaths: acc.deaths, caps: acc.caps, humans: list, shots: mine, serverNow: now };
+}
+
+function noteNop(msg) {
+  const key = sessions.get(String(msg.token || ""));
+  if (!key) return { ok: false, error: "Session faded. Drop in again." };
+  const human = humans.get(key);
+  if (human) human.at = Date.now();
+  return { ok: true };
+}
+
+function notePong(msg) {
+  const key = sessions.get(String(msg.token || ""));
+  const acc = key ? accounts.get(key) : null;
+  if (!acc) return { ok: false };
+  const sent = Number(msg.t) || 0;
+  if (!sent) return { ok: true };
+  const rtt = Math.max(0, Math.min(9999, Date.now() - sent));
+  acc.ping = rtt;
+  if (!acc.pingPubAt || Date.now() - acc.pingPubAt >= 5000) {
+    acc.pingPub = rtt;
+    acc.pingPubAt = Date.now();
+  }
+  return { ok: true };
+}
+
+function pushAfk(socket, action) {
+  try {
+    sendText(socket, JSON.stringify({ op: "afk", action }));
+  } catch {
+    sockets.delete(socket);
+  }
+}
+
+function sweepIdle() {
+  const now = Date.now();
+  for (const [key] of humans) {
+    const acc = accounts.get(key);
+    const sock = liveSock.get(key);
+    if (!acc || !sock || sock.destroyed) continue;
+    const quiet = !acc.lastActive || now - acc.lastActive >= 30000;
+    if (!quiet) continue;
+    acc.idleStrikes = (acc.idleStrikes || 0) + 1;
+    if (acc.idleStrikes === 1) pushAfk(sock, "spawn");
+    else {
+      pushAfk(sock, "kill");
+      acc.idleStrikes = 0;
+      acc.lastActive = now;
+    }
+  }
+}
+
+function seatPilot(socket, profile) {
+  const key = String(profile.nick || "").toLowerCase();
+  const acc = accounts.get(key);
+  if (!acc) return;
+  const was = humans.has(key);
+  const now = Date.now();
+  const prev = humans.get(key);
+  humans.set(key, {
+    nick: acc.nick,
+    team: acc.team,
+    charId: acc.charId,
+    x: prev?.x || 0,
+    y: prev?.y || 0,
+    z: prev?.z || 0,
+    yaw: prev?.yaw || 0,
+    hp: prev?.hp ?? 100,
+    lvl: Math.max(1, Math.floor(Math.sqrt((acc.xp || 0) / 40)) + 1),
+    at: now,
+  });
+  snapCount = -1;
+  const old = liveSock.get(key);
+  liveSock.set(key, socket);
+  socket._pilot = key;
+  acc.lastActive = now;
+  if (old && old !== socket) {
+    try {
+      old.end();
+    } catch {
+      /* already gone */
+    }
+  }
+  if (!was) {
+    const teamName = ["Citrus", "Voltage", "Code Red"][acc.team] || "the match";
+    const text = acc.returns ? `${acc.nick} rejoined ${teamName}.` : `${acc.nick} joined ${teamName}.`;
+    acc.returns = true;
+    const line = JSON.stringify({ op: "announce", nick: acc.nick, team: acc.team, text });
+    for (const sock of sockets) {
+      if (sock === socket || sock.destroyed || sock.writableEnded) continue;
+      try {
+        sendText(sock, line);
+      } catch {
+        sockets.delete(sock);
+      }
+    }
+  }
+  broadcastRoster();
+}
+
+function releasePilot(socket) {
+  const key = socket._pilot;
+  sockets.delete(socket);
+  if (!key || liveSock.get(key) !== socket) return;
+  liveSock.delete(key);
+  humans.delete(key);
+  snapCount = -1;
+  broadcastRoster();
 }
 
 function fanout(text) {
@@ -258,12 +402,18 @@ function onJson(socket, text) {
   try {
     if (msg.op === "join") body = joinPilot(msg);
     else if (msg.op === "pulse") body = pulse(msg);
+    else if (msg.op === "nop") body = noteNop(msg);
+    else if (msg.op === "pong") body = notePong(msg);
     else if (msg.op === "chat") body = sayChat(msg);
     else if (msg.op === "announce") body = sayAnnounce(msg, socket);
     else body = { ok: false, error: "Unknown op." };
   } catch (err) {
     console.error("pilot message failed", err);
     body = { ok: false, error: "Match hiccup. Try again." };
+  }
+  if (msg.op === "join" && body && body.ok) {
+    seatPilot(socket, body.profile);
+    body.board = rosterList();
   }
   sendText(socket, JSON.stringify({ id, ...body }));
   if (msg.op === "join" && body && body.ok) {
@@ -384,13 +534,45 @@ export function attachRelay(server) {
     );
     sockets.add(socket);
     bindSocket(socket, head);
-    socket.on("close", () => sockets.delete(socket));
-    socket.on("error", () => sockets.delete(socket));
+    socket.on("close", () => releasePilot(socket));
+    socket.on("error", () => releasePilot(socket));
   });
 }
 
 load();
 setInterval(save, 15000);
+setInterval(broadcastRoster, 10000);
+setInterval(sweepIdle, 30000);
+let pingI = 0;
+setInterval(() => {
+  const entries = [...liveSock.entries()];
+  const n = entries.length;
+  if (!n) return;
+  const perTick = Math.max(1, Math.ceil(n / 25));
+  for (let k = 0; k < perTick; k++) {
+    const pair = entries[pingI % n];
+    pingI++;
+    if (!pair) continue;
+    const [key, sock] = pair;
+    const acc = accounts.get(key);
+    if (!acc || !sock || sock.destroyed || sock.writableEnded) continue;
+    acc.probe = Date.now();
+    try {
+      sendText(sock, JSON.stringify({ op: "ping", t: acc.probe }));
+    } catch {
+      sockets.delete(sock);
+    }
+  }
+}, 200);
+setInterval(() => {
+  const rows = [];
+  for (const human of humans.values()) {
+    const acc = accounts.get(String(human.nick || "").toLowerCase());
+    if (!acc || !acc.pingPub) continue;
+    rows.push({ nick: human.nick, ms: acc.pingPub });
+  }
+  if (rows.length) fanout(JSON.stringify({ op: "pings", rows }));
+}, 5000);
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {

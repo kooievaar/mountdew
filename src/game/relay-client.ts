@@ -17,20 +17,43 @@ type PulseIn = {
   dd: number;
   dc: number;
   shots: { ox: number; oy: number; oz: number; dx: number; dy: number; dz: number; dmg: number }[];
+  fix?: boolean;
 };
 
 export type ChatLine = { nick: string; team: number; text: string };
+
+export type RosterPilot = {
+  nick: string;
+  team: number;
+  charId: string;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  hp: number;
+  lvl: number;
+  kills: number;
+  deaths: number;
+  xp: number;
+  caps: number;
+  ping?: number;
+};
 
 type RelayLink = {
   pulse: (body: PulseIn) => Promise<PulseResult>;
   close: () => void;
   chat: (text: string) => void;
   announce: (text: string) => void;
+  nop: () => void;
+  untilClose: () => Promise<void>;
 };
 
 let bound: RelayLink | null = null;
 const chatFns = new Set<(line: ChatLine) => void>();
 const announceFns = new Set<(text: string) => void>();
+const rosterFns = new Set<(pilots: RosterPilot[]) => void>();
+const afkFns = new Set<(action: "spawn" | "kill") => void>();
+const pingFns = new Set<(rows: { nick: string; ms: number }[]) => void>();
 
 export function bindRelay(next: RelayLink | null) {
   bound?.close();
@@ -47,6 +70,35 @@ export function sendRelayChat(text: string) {
 
 export function sendRelayAnnounce(text: string) {
   bound?.announce(text);
+}
+
+export function onRelayRoster(fn: (pilots: RosterPilot[]) => void) {
+  rosterFns.add(fn);
+  return () => {
+    rosterFns.delete(fn);
+  };
+}
+
+export function sendRelayNop() {
+  bound?.nop();
+}
+
+export function dropRelay() {
+  bound?.close();
+}
+
+export function onRelayAfk(fn: (action: "spawn" | "kill") => void) {
+  afkFns.add(fn);
+  return () => {
+    afkFns.delete(fn);
+  };
+}
+
+export function onRelayPings(fn: (rows: { nick: string; ms: number }[]) => void) {
+  pingFns.add(fn);
+  return () => {
+    pingFns.delete(fn);
+  };
 }
 
 export function onRelayAnnounce(fn: (text: string) => void) {
@@ -81,8 +133,13 @@ export function connectRelay(url: string): Promise<RelayHandle & RelayLink> {
     }
     const waiters = new Map<number, Waiter>();
     let seq = 1;
+    let token = "";
     let opened = false;
-    let openedHandle: { pulse: (body: PulseIn) => Promise<PulseResult>; close: () => void } | null = null;
+    let openedHandle: RelayLink | null = null;
+    let markClosed = () => {};
+    const untilClose = new Promise<void>((resolve) => {
+      markClosed = resolve;
+    });
     const timer = window.setTimeout(() => {
       if (!opened) {
         sock.close();
@@ -103,7 +160,6 @@ export function connectRelay(url: string): Promise<RelayHandle & RelayLink> {
     sock.addEventListener("open", () => {
       opened = true;
       window.clearTimeout(timer);
-      let token = "";
       const handle = {
         async join(nick: string, password: string, team: number, charId: string): Promise<JoinResult> {
           const msg = await send("join", { nick, password, team, charId });
@@ -135,6 +191,13 @@ export function connectRelay(url: string): Promise<RelayHandle & RelayLink> {
           if (!token || !clean) return;
           sock.send(JSON.stringify({ op: "announce", id: seq++, token, text: clean }));
         },
+        nop() {
+          if (!token || sock.readyState !== WebSocket.OPEN) return;
+          void send("nop", { token }).catch(() => {});
+        },
+        untilClose() {
+          return untilClose;
+        },
         close() {
           sock.close();
         },
@@ -148,6 +211,24 @@ export function connectRelay(url: string): Promise<RelayHandle & RelayLink> {
       try {
         msg = JSON.parse(String(ev.data)) as Record<string, unknown>;
       } catch {
+        return;
+      }
+      if (msg.op === "ping") {
+        if (sock.readyState === WebSocket.OPEN) sock.send(JSON.stringify({ op: "pong", t: msg.t, token }));
+        return;
+      }
+      if (msg.op === "afk" && (msg.action === "spawn" || msg.action === "kill")) {
+        for (const fn of afkFns) fn(msg.action);
+        return;
+      }
+      if (msg.op === "pings" && Array.isArray(msg.rows)) {
+        const rows = (msg.rows as { nick: string; ms: number }[]).slice(0, 1000);
+        for (const fn of pingFns) fn(rows);
+        return;
+      }
+      if (msg.op === "roster" && Array.isArray(msg.pilots)) {
+        const pilots = msg.pilots as RosterPilot[];
+        for (const fn of rosterFns) fn(pilots);
         return;
       }
       if (msg.op === "announce" && typeof msg.text === "string") {
@@ -175,6 +256,7 @@ export function connectRelay(url: string): Promise<RelayHandle & RelayLink> {
       for (const waiter of waiters.values()) waiter.fail(new Error("closed"));
       waiters.clear();
       if (bound === openedHandle) bound = null;
+      markClosed();
     });
   });
 }

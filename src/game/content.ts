@@ -63,7 +63,10 @@ export type AbilityId =
   | "flame"
   | "sheep"
   | "builder"
-  | "wall";
+  | "wall"
+  | "tesla"
+  | "winner"
+  | "flux";
 
 export type CharDef = {
   id: string;
@@ -81,10 +84,10 @@ export type CharDef = {
 };
 
 export const CHARACTERS: CharDef[] = [
-  { id: "angel", name: "Seraph Doll", blurb: "Petite white-haired angel. Wings, halo, hold jump to glide.", hair: 0xfff6ea, cloth: 0xfff4d8, skin: 0xffe0c4, style: "doll", ability: "glide", abilityName: "Halo glide", weapons: ["plasma", "laugh", "melee"], jumps: 2, voice: 620 },
-  { id: "pickme", name: "Bluebelle", blurb: "Blue-haired spark. Speeds her squad and never stops cheering.", hair: 0x2f8cff, cloth: 0xff7eb8, skin: 0xffd2b8, style: "sport", ability: "aura", abilityName: "Pick-me pulse", weapons: ["dual", "plasma", "laugh"], jumps: 2, voice: 540 },
-  { id: "goth", name: "Noir Nyx", blurb: "Petite, straight black hair, long shadow dash.", hair: 0x140e18, cloth: 0x3a2450, skin: 0xf3d0b8, style: "goth", ability: "shadow", abilityName: "Shadow dash", weapons: ["plasma", "knife", "laugh"], jumps: 2, voice: 300 },
-  { id: "bestie", name: "Bestie Bea", blurb: "The goth's best friend. Fast revive, shared heal, everybody happy.", hair: 0xff9ec4, cloth: 0xff5b93, skin: 0xffd0b0, style: "doll", ability: "bestie", abilityName: "Bestie pulse", weapons: ["plasma", "laugh", "melee"], jumps: 2, voice: 580 },
+  { id: "angel", name: "Sugoimeg", blurb: "White angelic doll. Wings, halo, hold jump to glide. A hello to megqtxo.", hair: 0xfff6ea, cloth: 0xfff4d8, skin: 0xffe0c4, style: "doll", ability: "glide", abilityName: "Halo glide", weapons: ["plasma", "laugh", "melee"], jumps: 2, voice: 620 },
+  { id: "pickme", name: "Dizzydezzy", blurb: "Blue-haired doll. Speeds her squad and never stops spinning.", hair: 0x2f8cff, cloth: 0x7ec8ff, skin: 0xffd2b8, style: "doll", ability: "aura", abilityName: "Dizzy pulse", weapons: ["dual", "plasma", "laugh"], jumps: 2, voice: 540 },
+  { id: "goth", name: "Gothgirl", blurb: "Straight black hair. Long shadow dash.", hair: 0x140e18, cloth: 0x3a2450, skin: 0xf3d0b8, style: "goth", ability: "shadow", abilityName: "Shadow dash", weapons: ["plasma", "knife", "laugh"], jumps: 2, voice: 300 },
+  { id: "bestie", name: "PickMe", blurb: "Pink-haired friend of the goth. Fast revive and a shared heal.", hair: 0xff9ec4, cloth: 0xff5b93, skin: 0xffd0b0, style: "doll", ability: "bestie", abilityName: "Pick-me pulse", weapons: ["plasma", "laugh", "melee"], jumps: 2, voice: 580 },
   { id: "puff", name: "Puffstar", blurb: "Inhale, float, then flatten into a slide. Original, not a copy.", hair: 0xff8ad4, cloth: 0xff5fa2, skin: 0xffb7d5, style: "round", ability: "puff", abilityName: "Inhale", weapons: ["bounce", "plasma", "melee"], jumps: 2, voice: 700 },
   { id: "bunny", name: "Hopscotch", blurb: "Chain jumps to run faster and bounce higher, up to a cap.", hair: 0xfff0c2, cloth: 0xff8a3d, skin: 0xffd2b0, style: "sport", ability: "bunny", abilityName: "Bunny chain", weapons: ["plasma", "laugh", "melee"], jumps: 2, voice: 640 },
   { id: "trips", name: "Triple Mint", blurb: "Three jumps. Everyone else still gets two.", hair: 0xb8ffcf, cloth: 0x63d6a0, skin: 0xffe0c8, style: "sport", ability: "triple", abilityName: "Triple jump", weapons: ["plasma", "bounce", "melee"], jumps: 3, voice: 600 },
@@ -101,6 +104,11 @@ export const CHARACTERS: CharDef[] = [
   { id: "bleat", name: "Superbleat", blurb: "Fly as a kamikaze lamb, pop, then hop out alive.", hair: 0xfff6ea, cloth: 0xf7f7f2, skin: 0xffe8d8, style: "round", ability: "sheep", abilityName: "Superbleat", weapons: ["plasma", "laugh", "melee"], jumps: 2, voice: 660 },
   { id: "blocky", name: "Blocky", blurb: "Places pads, walls, turrets and traps faster.", hair: 0x8fd14f, cloth: 0x4a7a32, skin: 0xf0c8a8, style: "sport", ability: "builder", abilityName: "Foreman", weapons: ["plasma", "bounce", "melee"], jumps: 2, voice: 420 },
   { id: "wallaby", name: "Wallaby", blurb: "Wallrides almost without falling.", hair: 0xffd27a, cloth: 0xef5b3c, skin: 0xf8d2b4, style: "sport", ability: "wall", abilityName: "Long ride", weapons: ["plasma", "melee", "laugh"], jumps: 2, voice: 500 },
+  { id: "laile", name: "Laile", blurb: "Pink rambler. She keeps talking while she fights. A nod to the pink Barbie.", hair: 0xff5ea8, cloth: 0xff8ec8, skin: 0xffd0c4, style: "doll", ability: "aura", abilityName: "Rambler", weapons: ["plasma", "laugh", "melee"], jumps: 2, voice: 520 },
+  { id: "cloudy", name: "Cloudy", blurb: "Big-headed blonde. Flies, spills rainbows, and falls through the looking glass.", hair: 0xffe08a, cloth: 0x3ec6ff, skin: 0xffe0c8, style: "round", ability: "bird", abilityName: "Wonderflight", weapons: ["plasma", "laugh", "bounce"], jumps: 2, voice: 640 },
+  { id: "donnie", name: "The Donald", blurb: "Cartoon showman. Killstreaks become Winner calls. Twenty is god mode.", hair: 0xf0d060, cloth: 0x1a2a6b, skin: 0xf0b070, style: "sport", ability: "winner", abilityName: "You're fired", weapons: ["plasma", "rocket", "melee"], jumps: 2, voice: 180 },
+  { id: "elon", name: "The Elon", blurb: "Throws a different car every time and will not stop selling it.", hair: 0x6b4a32, cloth: 0x1a1a1a, skin: 0xf0c8a8, style: "sport", ability: "tesla", abilityName: "Throw a car", weapons: ["rocket", "plasma", "melee"], jumps: 2, voice: 240 },
+  { id: "flux", name: "Ensign Flux", blurb: "Laser pistol. Boom. Fluxxed you right in the capaciter.", hair: 0xc9a06a, cloth: 0xc6a15a, skin: 0xf0d0b4, style: "sport", ability: "flux", abilityName: "Flux pistol", weapons: ["plasma", "sniper", "knife"], jumps: 2, voice: 360 },
 ];
 
 export const CHAR_BY_ID = Object.fromEntries(CHARACTERS.map((c) => [c.id, c]));
@@ -174,10 +182,84 @@ export const LINES: Record<string, string> = {
   wall: "hup!",
   water: "splish!",
   land: "phew!",
-  down: "help!",
+  down: "oooowh!",
+  die: "aiaiai!",
   sheep: "baaaa!",
   yay: "jeehee!",
   ride: "chuchu!",
   puff: "whooo!",
   groan: "graaah!",
 };
+
+const DYING = ["oooowh!", "wergh!", "aiaiai!", "owowow!", "eep!"];
+
+const FLIGHT: Record<string, string[]> = {
+  angel: ["joohoo!", "joohoo halo!", "joohoo up we go"],
+  pickme: ["joohoo dizzy!", "joohoo spin!", "joohoo!"],
+  goth: ["joohoo...", "joohoo darkly", "joohoo"],
+  bestie: ["joohoo bestie!", "joohoo with me!", "joohoo!"],
+  puff: ["joohoo puff!", "joohoo float", "joohoo!"],
+  bunny: ["joohoo hop!", "joohoo bounce", "joohoo!"],
+  trips: ["joohoo three!", "joohoo mint", "joohoo!"],
+  boomer: ["joohoo boom!", "joohoo rocket", "joohoo!"],
+  buzz: ["joohoo buzz!", "joohoo hover", "joohoo!"],
+  lark: ["joohoo bird!", "joohoo flap", "joohoo!"],
+  pack: ["joohoo pack!", "joohoo thrust", "joohoo!"],
+  pin: ["joohoo pin", "joohoo rite", "joohoo"],
+  wrap: ["joohoo wrap", "joohoo linen", "joohoo"],
+  bone: ["joohoo bones", "joohoo", "joohoo rattle"],
+  glass: ["joohoo steady", "joohoo", "joohoo lens"],
+  twin: ["joohoo twins!", "joohoo!", "joohoo both"],
+  cinder: ["joohoo spark!", "joohoo fire", "joohoo!"],
+  bleat: ["joohoo baa!", "joohoo!", "joohoo lamb"],
+  blocky: ["joohoo block!", "joohoo!", "joohoo build"],
+  wallaby: ["joohoo wall!", "joohoo ride", "joohoo!"],
+  laile: ["joohoo and another thing", "joohoo wait listen", "joohoo!"],
+  cloudy: ["joohoo curiouser", "joohoo rainbow", "joohoo!"],
+  donnie: ["joohoo tremendous", "joohoo winner", "joohoo!"],
+  elon: ["joohoo to mars", "joohoo buy this", "joohoo!"],
+  flux: ["joohoo flux", "joohoo capaciter", "joohoo!"],
+};
+
+const CHATTER: Record<string, string[]> = {
+  angel: ["the light likes you", "wings stay polite", "halo on", "bless this flag"],
+  pickme: ["spin with me", "blue hair don't care", "dizzy but accurate", "again again"],
+  goth: ["this hill is mine", "don't smile", "shadows first", "how dreary and fun"],
+  bestie: ["I saved you a spot", "pink team up", "hold my soda", "best friends score"],
+  puff: ["inhale the desert", "so round so fast", "floaties out", "soft landing maybe"],
+  bunny: ["hop hop hop", "the chain is the point", "ears up", "boing with intent"],
+  trips: ["third jump is a lifestyle", "minty fresh air", "one two three", "leave them two"],
+  boomer: ["rockets solve stairs", "count the boom", "up is a direction", "pardon the crater"],
+  buzz: ["drone out", "I see you", "buzz off kindly", "hover tax"],
+  lark: ["the wind owes me", "flap budget remains", "sky is open", "tweet no, fight yes"],
+  pack: ["thruster warm", "backpack says yes", "fuel is a feeling", "hold jump, trust me"],
+  pin: ["the pin finds a friend", "rise if you mean it", "doll of the rite", "careful, it listens"],
+  wrap: ["stay wrapped", "linen holds", "the quiet kind of tough", "unwrap later"],
+  bone: ["bones, politely", "the rattle is a greeting", "slower, harder", "mind the ribs"],
+  glass: ["breath out, then the shot", "the lens doesn't lie", "hold still", "one clean look"],
+  twin: ["both barrels agree", "left and right, same idea", "crosshair date", "twins don't miss twice"],
+  cinder: ["a little flame", "toasty, not tragic", "cone of cute", "mind the eyebrows"],
+  bleat: ["baa with purpose", "I come back", "lamb out", "pop then hop"],
+  blocky: ["pad here", "wall there", "the map can be improved", "foreman on site"],
+  wallaby: ["the wall is a road", "don't let go", "ride it out", "vertical is fine"],
+  laile: ["so basically what happened was", "and then, wait, the good part", "I am still talking", "pink microphone on"],
+  cloudy: ["down the wrong rabbit", "rainbows are tactical", "my head arrived first", "curiouser, fire"],
+  donnie: ["tremendous pilot", "you're looking at a winner", "the best jump", "everybody says so"],
+  elon: ["the car is the argument", "different model, same point", "they see me rollin", "mars can wait one flag"],
+  flux: ["fluxxed in the capaciter", "laser says hello", "boom, politely", "ensign on the hill"],
+};
+
+export function spokenLine(charId: string, key: string): string {
+  if (key === "die" || key === "down") return DYING[Math.floor(Math.random() * DYING.length)]!;
+  if (key === "jump" || key === "double" || key === "triple") {
+    const set = FLIGHT[charId] || ["joohoo!"];
+    return set[Math.floor(Math.random() * set.length)]!;
+  }
+  if (key === "idle") {
+    const set = CHATTER[charId] || ["jeehee!"];
+    return set[Math.floor(Math.random() * set.length)]!;
+  }
+  const own = CHATTER[charId];
+  if (own && key !== "help" && key !== "groan" && key !== "sheep" && Math.random() < 0.55) return own[Math.floor(Math.random() * own.length)]!;
+  return LINES[key] || key;
+}

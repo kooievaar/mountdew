@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type FormEvent, type PointerEvent } from "
 import { Eye, List, Map, Maximize2, Settings, Terminal, X } from "lucide-react";
 import { CHARACTERS, TEAMS } from "@/game/content";
 import type { GameHandle, HudState, Quality } from "@/game/engine";
-import { bindRelay, connectRelay, onRelayAnnounce, onRelayChat, relayBound, sendRelayChat } from "@/game/relay-client";
+import { bindRelay, connectRelay, onRelayAfk, onRelayAnnounce, onRelayChat, onRelayPings, onRelayRoster, relayBound, sendRelayChat } from "@/game/relay-client";
 import { fetchBoard, joinMount, type BoardRow } from "@/lib/mount-api";
 
 export const Route = createFileRoute("/")({ component: Home });
@@ -31,6 +31,7 @@ function Home() {
   const viewRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const gameRef = useRef<GameHandle | null>(null);
+  const linkStop = useRef<(() => void) | null>(null);
   const [nick, setNick] = useState("");
   const [password, setPassword] = useState("");
   const [relay, setRelay] = useState<string>(SERVERS[0]);
@@ -90,8 +91,9 @@ function Home() {
       const qa = new URLSearchParams(window.location.search).has("qa");
       const game = mod.createGame(viewRef.current, overlayRef.current, { qa });
       gameRef.current = game;
+      game.intro();
       const savedGfx = localStorage.getItem(GFX) as Quality | null;
-      if (savedGfx === "low" || savedGfx === "medium" || savedGfx === "high") game.setQuality(savedGfx);
+      if (savedGfx === "low" || savedGfx === "medium" || savedGfx === "high" || savedGfx === "ultra") game.setQuality(savedGfx);
       stop = game.subscribe(() => setHud(game.getHud()));
       setHud(game.getHud());
       if (qa) void enter(game, "PilotQA", "qatest", 0, "angel", true);
@@ -109,8 +111,16 @@ function Home() {
     setChat((prev) => [...prev, { ...line, id: chatSeq.current++ }].slice(-40));
   }), []);
 
-  useEffect(() => onRelayAnnounce((text) => {
-    gameRef.current?.pushAnnounce(text);
+  useEffect(() => onRelayRoster((pilots) => {
+    gameRef.current?.applyRoster(pilots);
+  }), []);
+
+  useEffect(() => onRelayPings((rows) => {
+    gameRef.current?.notePings(rows);
+  }), []);
+
+  useEffect(() => onRelayAfk((action) => {
+    gameRef.current?.applyAfk(action);
   }), []);
 
   useEffect(() => {
@@ -150,33 +160,69 @@ function Home() {
     if (address && !qa) {
       const known = (SERVERS as readonly string[]).includes(address);
       const order = known ? [address, ...SERVERS.filter((url) => url !== address)] : [address];
-      let linked = false;
-      for (const url of order) {
-        try {
-          const link = await connectRelay(url);
-          const res = await link.join(clean, pass, teamId, hero);
-          if (!res.ok) {
-            link.close();
-            setError(res.error);
-            setBusy(false);
-            return;
+      linkStop.current?.();
+      let stopped = false;
+      let linkedOnce = false;
+      const stop = () => {
+        stopped = true;
+        bindRelay(null);
+      };
+      linkStop.current = stop;
+      let delay = 700;
+      while (!stopped) {
+        for (const url of order) {
+          if (stopped) return;
+          try {
+            const link = await connectRelay(url);
+            if (stopped) {
+              link.close();
+              return;
+            }
+            const res = await link.join(clean, pass, teamId, hero);
+            if (!res.ok) {
+              link.close();
+              if (/password|nickname|team|full/i.test(res.error)) {
+                setError(res.error);
+                setBusy(false);
+                stopped = true;
+                return;
+              }
+              continue;
+            }
+            bindRelay(link);
+            localStorage.setItem(RELAY, url);
+            localStorage.setItem(REMEMBER, JSON.stringify({ nick: clean, password: pass, team: teamId, charId: hero }));
+            setRelay(url);
+            setBoard(res.board);
+            if (!linkedOnce) {
+              game.deploy({ nick: res.profile.nick, team: teamId, charId: hero, token: res.token, xp: res.profile.xp, qa });
+              game.pushLine(url === SERVERS[0] ? "match server linked" : `linked ${url}`);
+              setPhase("play");
+              setError("");
+              setBusy(false);
+              linkedOnce = true;
+            } else {
+              game.setToken(res.token);
+              game.pushLine("link restored");
+            }
+            delay = 700;
+            await link.untilClose();
+            if (stopped) return;
+            break;
+          } catch {
+            /* try the next public server */
           }
-          localStorage.setItem(RELAY, url);
-          localStorage.setItem(REMEMBER, JSON.stringify({ nick: clean, password: pass, team: teamId, charId: hero }));
-          bindRelay(link);
-          setRelay(url);
-          setBoard(res.board);
-          game.deploy({ nick: res.profile.nick, team: teamId, charId: hero, token: res.token, xp: res.profile.xp, qa });
-          game.pushLine(url === SERVERS[0] ? "match server linked" : `linked ${url}`);
-          setPhase("play");
-          linked = true;
-          break;
-        } catch {
-          /* try the next public server */
         }
+        if (stopped) return;
+        if (!linkedOnce) {
+          setError("Still trying the match servers…");
+          setBusy(false);
+        } else {
+          game.pushLine("reconnecting");
+        }
+        await new Promise((r) => setTimeout(r, delay));
+        delay = Math.min(5000, Math.round(delay * 1.5));
       }
-      if (!linked) setError("None of the match servers answered. Clear the address to play in this browser.");
-      setBusy(false);
       return;
     }
     if (!address) localStorage.removeItem(RELAY);
@@ -238,7 +284,7 @@ function Home() {
       <canvas ref={viewRef} className="view" />
       <canvas ref={overlayRef} className="overlay" />
       {phase === "login" ? (
-        <div className="login">
+        <div className="login" onPointerDown={() => gameRef.current?.intro()}>
           <div className="site">
             <header className="site-bar">
               <div>
@@ -294,7 +340,7 @@ function Home() {
                 </div>
                 <div className="pilot-grid" role="listbox" aria-label="Pilots">
                   {CHARACTERS.map((c) => (
-                    <button key={c.id} className={charId === c.id ? "pilot on" : "pilot"} onClick={() => setCharId(c.id)} type="button" aria-pressed={charId === c.id}>
+                    <button key={c.id} className={charId === c.id ? "champ on" : "champ"} onClick={() => setCharId(c.id)} type="button" aria-pressed={charId === c.id}>
                       <img src={`/game/pilots/${c.id}.jpg`} alt="" />
                       <span>{c.name}</span>
                     </button>
@@ -515,7 +561,7 @@ function Home() {
           {hud.score ? (
             <section className="sheet">
               <div className="topbar">
-                <h2>Scoreboard</h2>
+                <h2>Scoreboard · {hud.rows.length}</h2>
                 <button className="icon-btn" type="button" aria-label="Close scoreboard" onClick={() => gameRef.current?.toggleScore()}>
                   <X size={18} />
                 </button>
@@ -529,14 +575,16 @@ function Home() {
                         .filter((r) => r.team === t.id)
                         .sort((a, b) => b.xp - a.xp)
                         .map((r) => (
-                          <div className={r.me ? "pilot me" : "pilot"} key={`${t.id}-${r.name}`}>
+                          <div className={r.me ? "pilot me" : "pilot"} key={`${t.id}-${r.kind}-${r.name}`}>
+                            <span className={`mark ${r.kind}`} title={r.kind} />
+                            {r.charId ? <img className="mini" src={`/game/pilots/${r.charId}.jpg`} alt="" /> : <span className="mini blank" />}
                             <span className="rank">{r.rank}</span>
                             <span>{r.name}</span>
                             <span>L{r.lvl}</span>
                             <span>
                               {r.k}/{r.d}
                             </span>
-                            <span>{r.xp}</span>
+                            <span className="ms">{r.kind === "human" ? `${r.ping || "–"} ms` : r.kind}</span>
                           </div>
                         ))}
                     </div>
@@ -579,7 +627,7 @@ function Home() {
               {tab === "graphics" ? (
                 <div>
                   <div className="teams">
-                    {(["low", "medium", "high"] as Quality[]).map((q) => (
+                    {(["low", "medium", "high", "ultra"] as Quality[]).map((q) => (
                       <button
                         key={q}
                         className={hud.graphics === q ? "choice on" : "choice"}
@@ -589,8 +637,10 @@ function Home() {
                           gameRef.current?.setQuality(q);
                         }}
                       >
-                        {q === "low" ? "Low" : q === "medium" ? "Medium" : "High"}
-                        <small>{q === "low" ? "Older laptop GPU" : q === "medium" ? "4 cores and up" : "Flagship GPU"}</small>
+                        {q === "low" ? "Low" : q === "medium" ? "Medium" : q === "high" ? "High" : "Ultra"}
+                        <small>
+                          {q === "low" ? "Older laptop GPU" : q === "medium" ? "4 cores and up" : q === "high" ? "Flagship GPU" : "Pencil shadows and ragdoll"}
+                        </small>
                       </button>
                     ))}
                   </div>

@@ -1,15 +1,18 @@
 import * as THREE from "three";
-import { netPulse, sendRelayAnnounce } from "@/game/relay-client";
+import { dropRelay, netPulse, sendRelayAnnounce, sendRelayNop } from "@/game/relay-client";
+import type { RosterPilot } from "@/game/relay-client";
 import { createAudio } from "./audio";
+import { TESLA_NAMES, teslaGeometries } from "./cars";
+import { createFigures, type FigureSpec } from "./figure";
 import {
   BOT_NAMES,
   BUILD_ACTIONS,
   CHAR_BY_ID,
   CHARACTERS,
-  LINES,
   TEAMS,
   WEAPON_BY_ID,
   rankForLevel,
+  spokenLine,
   xpToLevel,
   type CharDef,
   type TeamId,
@@ -17,7 +20,7 @@ import {
 import { buildWorld, inRiver, querySolidIds, rayAABB, raySolids, type RayHit, type Solid, type WorldData } from "./world";
 import { bakeTextures } from "./textures";
 
-export type Quality = "low" | "medium" | "high";
+export type Quality = "low" | "medium" | "high" | "ultra";
 
 export type HudState = {
   phase: "attract" | "play";
@@ -33,7 +36,7 @@ export type HudState = {
   feed: { id: number; text: string; at: number }[];
   log: { text: string }[];
   banner: string;
-  rows: { team: number; name: string; lvl: number; rank: string; k: number; d: number; xp: number; me: boolean }[];
+  rows: { team: number; name: string; lvl: number; rank: string; k: number; d: number; xp: number; me: boolean; kind: string; ping: number; charId: string }[];
   time: string;
   date: string;
   season: string;
@@ -138,10 +141,11 @@ type Actor = {
   spree: number;
   spreeAt: number;
   lifeStreak: number;
+  fall: number;
 };
 
 type Dyn = Solid & { alive: boolean; kind: string; team: number; cool: number; link: number; yaw: number };
-type Ball = { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; bounces: number; kind: string; team: number; owner: number; dmg: number };
+type Ball = { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; bounces: number; kind: string; team: number; owner: number; dmg: number; model: number; spin: number; tilt: number; face: number; laughT: number };
 type Drone = { x: number; y: number; z: number; team: number; life: number; dmg: number; owner: number };
 type Smile = { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number };
 type Tracer = { x1: number; y1: number; z1: number; x2: number; y2: number; z2: number; life: number; max: number; color: number };
@@ -181,6 +185,7 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
   const dyn: Dyn[] = [];
   const actors: Actor[] = [];
   const balls: Ball[] = [];
+  let carSerial = 0;
   const drones: Drone[] = [];
   const smiles: Smile[] = [];
   const tracers: Tracer[] = [];
@@ -209,6 +214,8 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
   let nextId = 2;
   let player: Actor | null = null;
   let token = "";
+  let pulseGen = 0;
+  let linked: RosterPilot[] = [];
   let spectate = false;
   const fly = { x: 0, y: 14, z: 30, yaw: 0, pitch: -0.3 };
   let commentT = 8;
@@ -244,6 +251,17 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
   let trainToot = 0;
   let smileSnd = 0;
   let netAcc = 0;
+  let lastNet = 0;
+  let afkFix = false;
+  let rambleT = 7;
+  let rambleI = 0;
+  let chatterT = 5;
+  const RAMBLE = [
+    "okay wait I was just saying the pink one",
+    "and then she goes no stay with me this matters",
+    "I am still talking because the story is not done",
+    "hold on the next part is the good part",
+  ];
   let uiAcc = 0;
   let fid = 1;
   const feed: { id: number; text: string; at: number }[] = [];
@@ -561,6 +579,16 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
   (blobM.material as THREE.MeshLambertMaterial).depthWrite = false;
 
   const ballM = makeParts(new THREE.SphereGeometry(0.28, 10, 8), 40, skins.metal);
+  const carPools = teslaGeometries().map((geo) => {
+    const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }), 8);
+    mesh.frustumCulled = false;
+    mesh.count = 0;
+    scene.add(mesh);
+    return mesh;
+  });
+  const pilots = createFigures(scene, MAX, false);
+  const mutants = createFigures(scene, 48, true);
+  let frameDt = 0.016;
   const droneM = makeParts(new THREE.BoxGeometry(0.7, 0.22, 0.7), 16, skins.metal);
   const smileTex = (() => {
     const c = document.createElement("canvas");
@@ -769,7 +797,16 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     sendRelayAnnounce(text);
   }
 
-  function streakTitle(spree: number, life: number) {
+  function streakTitle(spree: number, life: number, charId = "") {
+    if (charId === "donnie") {
+      if (life === 20) return "DONALD TRUMP IS GODMODE!";
+      if (life === 10) return "Double penta-kill";
+      if (spree >= 5) return "Penta-kill";
+      if (spree === 4) return "Quadruple Winner!";
+      if (spree === 3) return "Triple Winner!";
+      if (spree === 2) return "Double Winner!";
+      return "";
+    }
     if (life === 20) return "GODMODE";
     if (life === 10) return "DOUBLE PENTA-KILL";
     if (spree >= 5) return "PENTA-KILL";
@@ -797,10 +834,10 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
   }
 
   function say(a: Actor, key: string) {
-    if (a.voiceCd > 0) return;
-    a.voiceCd = a === player ? 0.5 : a.minion ? 1.35 : 1.75;
-    a.speech = LINES[key] || key;
-    a.speechT = 1.15;
+    if (key !== "die" && a.voiceCd > 0) return;
+    a.voiceCd = key === "die" ? 0.4 : a === player ? 0.45 : a.minion ? 1.35 : 1.6;
+    a.speech = spokenLine(a.charId, key);
+    a.speechT = key === "die" ? 1.4 : 1.35;
     const ch = CHAR_BY_ID[a.charId];
     audio.voiceAt(a.x, a.y + 1.2, a.z, ch?.voice || 440, key, a.speech, a === player);
   }
@@ -962,7 +999,17 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       a.hp = 0;
       a.state = "down";
       a.downT = 0;
+      a.fall = 0;
       a.helpT = 0.2;
+      a.vy = Math.max(a.vy, 5.5);
+      if (src) {
+        const dx = a.x - src.x;
+        const dz = a.z - src.z;
+        const len = Math.hypot(dx, dz) || 1;
+        a.vx += (dx / len) * 5;
+        a.vz += (dz / len) * 5;
+      }
+      if (a === player) shake = Math.min(0.7, shake + 0.35);
       a.deaths += 1;
       a.lifeStreak = 0;
       a.spree = 0;
@@ -991,13 +1038,14 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       line(killLine, shout);
       if (shout) sendRelayAnnounce(killLine);
       if (src) {
-        const title = streakTitle(src.spree, src.lifeStreak);
+        const title = streakTitle(src.spree, src.lifeStreak, src.charId);
         if (title && shout) {
           line(title, true);
           sendRelayAnnounce(title);
         }
+        if (src.charId === "donnie") say(src, "You're fired!");
       }
-      say(a, "down");
+      say(a, "die");
       for (let i = 0; i < 8; i++) burst(a.x, a.y + 1, a.z, 0xffd27a, 4);
     }
   }
@@ -1140,6 +1188,7 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       spree: 0,
       spreeAt: 0,
       lifeStreak: 0,
+      fall: 1,
     };
     return a;
   }
@@ -1834,6 +1883,11 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
         team: a.team,
         owner: a.id,
         dmg: w.dmg,
+        model: 0,
+        spin: 0,
+        tilt: 0,
+        face: a.yaw,
+        laughT: 0.15,
       });
     } else if (w.kind === "drone") {
       drones.push({ x: ox + dir.x, y: oy, z: oz + dir.z, team: a.team, life: 8, dmg: w.dmg, owner: a.id });
@@ -1935,6 +1989,48 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     } else if (ch.ability === "dual") {
       a.burst = 2.5;
       a.abilityCd = 6;
+    } else if (ch.ability === "tesla") {
+      aimDir(a, dir);
+      const lines = ["Buy this!", "And this!", "Take this!", "They see me rollin. They hatin.", "Wanna go to Mars?"];
+      const phrase = lines[Math.abs(a.kills + carSerial) % lines.length] || "Buy this!";
+      const model = carSerial % TESLA_NAMES.length;
+      carSerial += 1;
+      balls.push({
+        x: a.x + dir.x * 1.6,
+        y: a.y + 1.3,
+        z: a.z + dir.z * 1.6,
+        vx: dir.x * 16,
+        vy: dir.y * 7 + 6,
+        vz: dir.z * 16,
+        life: 4.4,
+        bounces: 0,
+        kind: "car",
+        team: a.team,
+        owner: a.id,
+        dmg: 70,
+        model,
+        spin: 0.6,
+        tilt: 0.35,
+        face: a.yaw,
+        laughT: 0,
+      });
+      a.abilityCd = 2.2;
+      say(a, phrase);
+    } else if (ch.ability === "winner") {
+      const lines = ["Double Winner!", "You're fired!", "All powers combined. I am Captain Planet!"];
+      a.abilityCd = 5;
+      a.vx += -Math.sin(a.yaw) * 10;
+      a.vz += -Math.cos(a.yaw) * 10;
+      say(a, lines[Math.abs(a.kills) % lines.length] || "Double Winner!");
+    } else if (ch.ability === "flux") {
+      a.abilityCd = 1.1;
+      shoot(a, "plasma");
+      say(a, "boom fluxxed you right in the capaciter");
+    } else if (ch.id === "cloudy") {
+      a.vy = Math.max(a.vy, 8);
+      a.abilityCd = 3;
+      for (const color of [0xff5a8a, 0xffe14a, 0x7dff4a, 0x3ec6ff, 0xb388ff]) burst(a.x, a.y + 1.4, a.z, color, 4);
+      say(a, "curiouser and curiouser");
     } else {
       a.abilityCd = 0.4;
       say(a, "yay");
@@ -2119,6 +2215,17 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
 
   function stepDown(a: Actor, dt: number) {
     a.downT += dt;
+    a.fall = Math.min(1, a.downT / 0.72);
+    if (a.fall < 1) {
+      a.vy -= 26 * dt;
+      a.vx *= Math.max(0, 1 - dt * 2.4);
+      a.vz *= Math.max(0, 1 - dt * 2.4);
+      collide(a, dt);
+      if (a.grounded && a.vy <= 0) {
+        a.vx *= 0.82;
+        a.vz *= 0.82;
+      }
+    }
     a.helpT -= dt;
     a.revive = 0;
     for (const o of actors) {
@@ -2129,6 +2236,7 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
         if (a.revive >= need) {
           a.state = "live";
           a.hp = 60;
+          a.fall = 1;
           a.invuln = 0.8;
           o.xp += 40;
           o.pendingXp += 40;
@@ -2287,6 +2395,7 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
         a.y += (a.ty - a.y) * k;
         a.z += (a.tz - a.z) * k;
         a.yaw = lerpAng(a.yaw, a.tyaw, k);
+        a.fall = a.state === "down" ? Math.min(1, a.fall + dt / 0.72) : 1;
         continue;
       }
       if (a.state === "down") stepDown(a, dt);
@@ -2295,19 +2404,30 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     for (let i = balls.length - 1; i >= 0; i--) {
       const b = balls[i]!;
       b.life -= dt;
-      b.vy -= (b.kind === "rocket" ? 4 : 12) * dt;
+      b.spin += dt * (b.kind === "car" ? 2.2 : 0);
+      b.tilt += dt * (b.kind === "car" ? 1.4 : 0);
+      b.vy -= (b.kind === "rocket" ? 4 : b.kind === "car" ? 9 : 12) * dt;
+      if (b.kind === "laugh") {
+        b.laughT -= dt;
+        if (b.laughT <= 0) {
+          b.laughT = 0.72;
+          audio.giggle(b.x, b.y, b.z);
+        }
+      }
       const nx = b.x + b.vx * dt;
       const ny = b.y + b.vy * dt;
       const nz = b.z + b.vz * dt;
       const dist = Math.hypot(b.vx, b.vy, b.vz) * dt;
       const hit = dist > 0.001 ? rayAll(b.x, b.y, b.z, b.vx / (Math.hypot(b.vx, b.vy, b.vz) || 1), b.vy / (Math.hypot(b.vx, b.vy, b.vz) || 1), b.vz / (Math.hypot(b.vx, b.vy, b.vz) || 1), dist) : null;
+      const reach = b.kind === "car" ? 1.45 : 0.8;
       let actorBounce = false;
       for (const a of actors) {
         if (a.id === b.owner || a.state !== "live") continue;
-        if (Math.hypot(a.x - nx, a.y + 0.8 - ny, a.z - nz) < 0.8) actorBounce = true;
+        if (Math.hypot(a.x - nx, a.y + 0.8 - ny, a.z - nz) < reach) actorBounce = true;
       }
+      const pops = b.kind === "rocket" || b.life <= 0 || (b.bounces >= 2 && (hit || actorBounce));
       if (hit || actorBounce || b.life <= 0) {
-        if (b.kind === "rocket" || b.life <= 0 || (b.bounces >= 2 && (hit || actorBounce))) {
+        if (pops) {
           if (b.kind === "laugh") {
             burst(b.x, b.y, b.z, 0xffe14a, 8);
             explode(b.x, b.y, b.z, 3.2, b.dmg, b.owner, 0);
@@ -2326,6 +2446,8 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
           balls.splice(i, 1);
         } else {
           b.bounces += 1;
+          b.spin += b.kind === "car" ? 1.4 : 0;
+          b.tilt += b.kind === "car" ? 0.8 : 0;
           const nxp = hit ? hit.nx : 0;
           const nyp = hit ? hit.ny : 1;
           const nzp = hit ? hit.nz : 0;
@@ -2514,19 +2636,41 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
         });
       }
     }
+    if (playing && player && player.state === "live") {
+      chatterT -= dt;
+      if (chatterT <= 0) {
+        chatterT = 7 + Math.random() * 5;
+        say(player, "idle");
+      }
+    }
+    if (playing && player && player.state === "live" && player.charId === "laile") {
+      rambleT -= dt;
+      if (rambleT <= 0) {
+        rambleT = 9;
+        say(player, RAMBLE[rambleI % RAMBLE.length] || "still talking");
+        rambleI++;
+      }
+    }
     netAcc += dt;
-    if (netAcc > 0.28 && token && player) {
-      netAcc = 0;
-      const dxp = player.pendingXp;
-      const dk = player.pendingK;
-      const dd = player.pendingD;
-      const dc = player.pendingC;
-      player.pendingXp = 0;
-      player.pendingK = 0;
-      player.pendingD = 0;
-      player.pendingC = 0;
-      const shots = pendingShots.splice(0, 8);
-      void netPulse({
+    if (token && player) {
+      const nowMs = performance.now();
+      const busy = pendingShots.length > 0 || player.pendingXp > 0 || player.pendingK > 0 || Math.hypot(player.vx, player.vz) > 0.4;
+      if ((busy || afkFix) && netAcc > 0.28) {
+        netAcc = 0;
+        lastNet = nowMs;
+        const fixing = afkFix;
+        afkFix = false;
+        const dxp = player.pendingXp;
+        const dk = player.pendingK;
+        const dd = player.pendingD;
+        const dc = player.pendingC;
+        player.pendingXp = 0;
+        player.pendingK = 0;
+        player.pendingD = 0;
+        player.pendingC = 0;
+        const shots = pendingShots.splice(0, 8);
+        const mine = ++pulseGen;
+        void netPulse({
           token,
           x: player.x,
           y: player.y,
@@ -2538,35 +2682,45 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
           dd,
           dc,
           shots,
+          fix: fixing,
         })
-        .then((res) => {
-          if (!res.ok || !player) {
-            player && (player.pendingXp += dxp);
-            return;
-          }
-          player.xp = Math.max(player.xp, res.xp + player.pendingXp);
-          syncHumans(res.humans);
-          for (const s of res.shots) {
-            if (seenShots.has(s.id) || !player) continue;
-            seenShots.add(s.id);
-            const t = sphereT(s.ox, s.oy, s.oz, s.dx, s.dy, s.dz, player.x, player.y + 0.9, player.z, 1.5, 80);
-            if (t != null && s.team !== player.team) hurt(player, s.dmg, null, false);
-            tracers.push({ x1: s.ox, y1: s.oy, z1: s.oz, x2: s.ox + s.dx * 20, y2: s.oy + s.dy * 20, z2: s.oz + s.dz * 20, life: 0.08, max: 0.08, color: TEAMS[s.team as TeamId]?.hex || 0xffffff });
-          }
-        })
-        .catch(() => {
-          if (player) player.pendingXp += dxp;
-        });
+          .then((res) => {
+            if (mine !== pulseGen || !player) return;
+            if (!res.ok) {
+              player.pendingXp += dxp;
+              if (/session|unknown/i.test(res.error)) dropRelay();
+              return;
+            }
+            player.xp = Math.max(player.xp, res.xp + player.pendingXp);
+            syncHumans(res.humans);
+            for (const s of res.shots) {
+              if (seenShots.has(s.id) || !player) continue;
+              seenShots.add(s.id);
+              const t = sphereT(s.ox, s.oy, s.oz, s.dx, s.dy, s.dz, player.x, player.y + 0.9, player.z, 1.5, 80);
+              if (t != null && s.team !== player.team) hurt(player, s.dmg, null, false);
+              tracers.push({ x1: s.ox, y1: s.oy, z1: s.oz, x2: s.ox + s.dx * 20, y2: s.oy + s.dy * 20, z2: s.oz + s.dz * 20, life: 0.08, max: 0.08, color: TEAMS[s.team as TeamId]?.hex || 0xffffff });
+            }
+          })
+          .catch(() => {
+            if (mine !== pulseGen) return;
+            if (player) player.pendingXp += dxp;
+          });
+      } else if (nowMs - lastNet > 1000) {
+        lastNet = nowMs;
+        sendRelayNop();
+      }
     }
   }
 
-  function syncHumans(humans: { nick: string; team: number; charId: string; x: number; y: number; z: number; yaw: number; hp: number; lvl: number }[]) {
+  function syncHumans(humans: { nick: string; team: number; charId: string; x: number; y: number; z: number; yaw: number; hp: number; lvl: number; kills?: number; deaths?: number; xp?: number }[]) {
     const names = new Set(humans.map((h) => h.nick));
+    for (const h of linked) if (!player || h.nick !== player.name) names.add(h.nick);
     for (const a of actors) {
       if (!a.remote) continue;
       if (!names.has(a.name)) a.state = "gone";
     }
     for (const h of humans) {
+      if (player && h.nick === player.name) continue;
       let a = actors.find((x) => x.remote && x.name === h.nick);
       if (!a) {
         a = makeActor({
@@ -2578,7 +2732,7 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
           y: h.y,
           z: h.z,
           yaw: h.yaw,
-          xp: h.lvl * 80,
+          xp: h.xp ?? h.lvl * 80,
           hp: h.hp,
         });
         actors.push(a);
@@ -2589,7 +2743,13 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       a.tyaw = h.yaw;
       a.hp = h.hp;
       a.team = h.team as TeamId;
-      a.state = h.hp <= 0 ? "down" : "live";
+      if (typeof h.kills === "number") a.kills = h.kills;
+      if (typeof h.deaths === "number") a.deaths = h.deaths;
+      if (typeof h.xp === "number") a.xp = Math.max(a.xp, h.xp);
+      const next = h.hp <= 0 ? "down" : "live";
+      if (a.state !== "down" && next === "down") a.fall = 0;
+      if (next === "live") a.fall = 1;
+      a.state = next;
     }
   }
 
@@ -2619,7 +2779,9 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     for (const mesh of humanMeshes) pose(mesh, i, 0, -80, 0, 0, 0, 0, 0.001, 0.001, 0.001);
     pose(faceM, i, 0, -80, 0, 0, 0, 0, 0.001, 0.001, 0.001);
   }
-  function drawMutant(i: number, a: Actor, x: number, y: number, z: number, down: boolean, flash: number) {
+  function drawMutant(i: number, a: Actor, x: number, y: number, z: number, ease: number, flash: number) {
+    const down = ease > 0.8;
+    const mix = (live: number, dead: number) => live + (dead - live) * ease;
     const yaw = a.yaw;
     const face = yaw + Math.PI;
     const fx = -Math.sin(yaw);
@@ -2636,9 +2798,10 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     const boneC = 0xf0ead8;
     const wound = 0x3a2014;
     const hang = (pitch: number, len: number) => ({ y: -Math.cos(pitch) * len, f: Math.sin(pitch) * len });
-    const bodyPitch = down ? 1.15 : 0.5 + step * 0.05;
-    const bodyY = y + (down ? 0.32 : 0.84 + bob);
-    poseYP(zBody, i, x + fx * 0.08, bodyY, z + fz * 0.08, bodyPitch, face, step * 0.09, 0.68, 0.5, 0.4);
+    const bodyPitch = mix(0.5 + step * 0.05, 1.2) + (1 - ease) * 0;
+    const flail = ease > 0 && ease < 0.95 ? Math.sin(ease * 24) : 0;
+    const bodyY = y + mix(0.84 + bob, 0.32);
+    poseYP(zBody, i, x + fx * 0.08, bodyY, z + fz * 0.08, bodyPitch, face, step * 0.09 + flail * 0.35, 0.68, 0.5, 0.4);
     paint(zBody, i, rag, flash);
     poseYP(zHump, i, x - fx * 0.16, bodyY + 0.16, z - fz * 0.16, bodyPitch - 0.25, face, 0, 0.34, 0.26, 0.28);
     paint(zHump, i, skin, flash);
@@ -2764,6 +2927,42 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     flap(-1, zRagR, a.anim + 1.4);
   }
 
+  function figureSpec(actor: Actor | null, x: number, y: number, z: number, ease: number, charId?: string): FigureSpec {
+    const ch = CHAR_BY_ID[actor?.charId || charId || "angel"] || CHARACTERS[0]!;
+    const look = lookOf(ch);
+    const sheep = (actor?.sheep || 0) > 0;
+    const gray = !!actor && actor.hp === 0 && actor.state !== "down";
+    const down = !actor || actor.state === "down" || ease > 0.95;
+    return {
+      x,
+      y,
+      z,
+      yaw: actor?.yaw ?? 0,
+      dt: frameDt,
+      speed: actor ? Math.hypot(actor.vx, actor.vz) : 0,
+      vy: actor?.vy ?? 0,
+      grounded: actor ? actor.grounded : true,
+      climb: !!actor?.climb,
+      dash: !!actor && (actor.lunge > 0 || actor.roll > 0),
+      down,
+      fall: actor?.state === "down" ? actor.fall : ease,
+      bounce: !!actor && actor.grounded && actor.sinceLand < 0.16,
+      sheep,
+      scale: (ch.style === "round" || sheep ? 1.12 : look.petite) * (actor?.flat ? 1.05 : 1),
+      squash: actor?.flat ? 0.72 : 1,
+      skin: gray ? 0x9a9a9a : ch.skin,
+      hair: gray ? 0x777777 : ch.hair,
+      cloth: gray ? 0x8a8a8a : ch.cloth,
+      hairLen: sheep ? 0.25 : 0.45 + look.hair[1],
+      skirt: sheep ? 0 : look.skirt,
+      wings: gray || sheep ? 0 : look.wings,
+      wingColor: look.wingColor,
+      halo: ch.ability === "glide" && !gray && !down && !sheep,
+      gun: !down && !sheep && !gray && !actor?.minion,
+      id: actor?.id ?? -1,
+    };
+  }
+
   function render() {
     const c = clockParts();
     const t = ((c.hoursF - 6) / 24) * Math.PI * 2;
@@ -2839,114 +3038,57 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       const slot = draw[i]!;
       const a = slot.a;
       const corpse = slot.corpse;
-      const ch = CHAR_BY_ID[(a?.charId || corpse?.charId || "angel")] || CHARACTERS[0]!;
-      const team = a?.team ?? (corpse?.team as TeamId) ?? 0;
       const x = a?.x ?? corpse!.x;
       const y = a?.y ?? corpse!.y;
       const z = a?.z ?? corpse!.z;
-      const face = (a?.yaw ?? 0) + Math.PI;
-      const down = a?.state === "down" || !!corpse;
-      const sheep = (a?.sheep || 0) > 0;
-      const flash = a?.flash || 0;
-      const gray = !!corpse || (a?.hp === 0 && a?.state !== "down");
+      const ease = corpse ? 1 : a?.state === "down" ? a.fall * a.fall * (3 - 2 * a.fall) : 0;
       if (a?.minion) {
-        park(i);
-        if (zi < ZMAX) drawMutant(zi++, a, x, y, z, down, flash);
+        pilots.hide(i);
+        if (zi < 48) mutants.place(zi++, figureSpec(a, x, y, z, ease));
         continue;
       }
-      const swing = a ? Math.sin(a.anim) * (a.grounded ? 0.7 : 0.2) : 0;
-      const bob = a && a.grounded ? Math.abs(Math.sin(a.anim)) * 0.06 : 0;
-      const roll = a ? (a.roll > 0 ? (1 - a.roll / 0.48) * Math.PI * 2 : 0) : 0;
-      const rx = down ? 1.25 : roll;
-      const hy = down ? 0.4 : 0;
-      const look = lookOf(ch);
-      const yaw = a?.yaw ?? 0;
-      const fx = -Math.sin(yaw);
-      const fz = -Math.cos(yaw);
-      const rxx = -Math.cos(face);
-      const rzz = Math.sin(face);
-      const sc = (ch.style === "round" || sheep ? 1.15 : look.petite) * (a?.flat ? 1.15 : 1);
-      const human = sheep ? 0.001 : 1;
-      const cloth = gray ? 0x8a8a8a : sheep ? 0xfff6ea : a?.minion ? 0x6d8a62 : ch.cloth;
-      const skin = gray ? 0x9a9a9a : ch.skin;
-      const hair = gray ? 0x777777 : ch.hair;
-      const bodyY = y + (down ? 0.45 : 1.02 + bob);
-      const headY = y + (down ? 0.72 : 1.58 + bob) + hy;
-      pose(bodyM, i, x, bodyY, z, rx, face, 0, 0.52 * sc * (a?.flat ? 1.25 : 1), (down ? 0.36 : 0.58) * (sheep ? 0.85 : 1) * (a?.flat ? 0.4 : 1), 0.36 * sc);
-      paint(bodyM, i, cloth, flash);
-      const headS = sheep || ch.style === "round" ? 0.78 : ch.style === "doll" || ch.style === "goth" ? 0.62 : 0.56;
-      pose(headM, i, x, headY, z, 0, face, 0, headS, headS * (ch.style === "doll" ? 1.05 : 1), headS);
-      paint(headM, i, sheep ? 0xfff6ea : skin, flash);
-      const bang = look.bangs;
-      pose(hairM, i, x + fx * 0.16, headY + 0.16, z + fz * 0.16, down ? 0.6 : 0, face, 0, bang[0] * human, bang[1] * human, bang[2] * human);
-      paint(hairM, i, hair, flash);
-      const hb = look.hair;
-      pose(hairBackM, i, x - fx * 0.2, headY + hb[3], z - fz * 0.2, down ? 1.1 : 0, face, 0, hb[0] * human, hb[1] * human, hb[2] * human);
-      paint(hairBackM, i, hair, flash);
-      const ps = Math.max(0.001, look.puff * human);
-      pose(hairLM, i, x + rxx * look.puffX, headY + look.puffY, z + rzz * look.puffX, 0, face, 0, ps, ps, ps);
-      paint(hairLM, i, hair, flash);
-      pose(hairRM, i, x - rxx * look.puffX, headY + look.puffY, z - rzz * look.puffX, 0, face, 0, ps, ps, ps);
-      paint(hairRM, i, hair, flash);
-      const sk = Math.max(0.001, look.skirt * human);
-      pose(skirtM, i, x, y + (down ? 0.28 : 0.58), z, down ? 1.2 : 0, face, 0, 0.92 * sk, down ? 0.12 : 0.34 * Math.min(sk, 1), 0.66 * sk);
-      paint(skirtM, i, gray ? 0x8a8a8a : look.skirtColor || cloth, flash);
-      const ws = look.wings > 0 && !sheep && !gray ? look.wings : 0.001;
-      const flap = Math.sin(performance.now() / 160 + i) * 0.45;
-      pose(wingLM, i, x + rxx * 0.32 - fx * 0.12, bodyY + 0.28, z + rzz * 0.32 - fz * 0.12, 0.15 + flap * 0.35, face, 0.35, 0.05 * ws, 0.28 * ws, 0.62 * ws);
-      paint(wingLM, i, look.wingColor, 0);
-      pose(wingRM, i, x - rxx * 0.32 - fx * 0.12, bodyY + 0.28, z - rzz * 0.32 - fz * 0.12, 0.15 + flap * 0.35, face, -0.35, 0.05 * ws, 0.28 * ws, 0.62 * ws);
-      paint(wingRM, i, look.wingColor, 0);
-      const pk = look.pack > 0 && !sheep ? look.pack : 0.001;
-      pose(packM, i, x - fx * 0.28, bodyY + 0.08, z - fz * 0.28, 0, face, 0, 0.36 * pk, 0.42 * pk, 0.22 * pk);
-      paint(packM, i, look.packColor, flash);
-      const wid = a ? loadout(ch)[a.weapon % loadout(ch).length] || "plasma" : "plasma";
-      const gunLen = wid === "sniper" || wid === "rocket" ? 0.72 : wid === "knife" || wid === "melee" ? 0.28 : 0.46;
-      const showGun = !down && !sheep && !gray;
-      pose(gunM, i, x + rxx * 0.48 + fx * 0.28, bodyY + Math.sin(swing) * 0.12, z + rzz * 0.48 + fz * 0.28, -0.2, face, 0, showGun ? 0.1 : 0.001, showGun ? 0.1 : 0.001, showGun ? gunLen : 0.001);
-      paint(gunM, i, wid === "flame" ? 0xff6a3d : wid === "sniper" ? 0xd7e7c4 : 0x8ea0b8, flash);
-      pose(handM, i, x + rxx * 0.4, y + (down ? 0.4 : 1.02) + Math.sin(swing) * 0.2, z + rzz * 0.4, swing, face, 0, down || sheep ? 0.001 : 0.32, 0.32, 0.32);
-      paint(handM, i, TEAMS[team]!.hex, flash);
-      pose(handRM, i, x - rxx * 0.4, y + (down ? 0.38 : 1.05) - Math.sin(swing) * 0.2, z - rzz * 0.4, -swing, face, 0, down || sheep ? 0.001 : 0.32, 0.32, 0.32);
-      paint(handRM, i, skin, flash);
-      pose(footM, i, x + rxx * 0.16, y + (down ? 0.15 : 0.14 + Math.max(0, -Math.sin(swing)) * 0.1), z + rzz * 0.16, -swing, face, 0, down ? 0.001 : 0.32, 0.16, 0.46);
-      paint(footM, i, ch.ability === "shadow" ? 0x111018 : 0x2a241c, flash);
-      pose(footRM, i, x - rxx * 0.16, y + (down ? 0.15 : 0.14 + Math.max(0, Math.sin(swing)) * 0.1), z - rzz * 0.16, swing, face, 0, down ? 0.001 : 0.32, 0.16, 0.46);
-      paint(footRM, i, ch.ability === "shadow" ? 0x111018 : 0x2a241c, flash);
-      const halo = ch.ability === "glide" && !gray && !down && !sheep;
-      pose(haloM, i, x, headY + 0.55, z, Math.PI / 2.4, performance.now() / 900, 0, halo ? 1.05 : 0.001, halo ? 1.05 : 0.001, halo ? 1.05 : 0.001);
-      paint(haloM, i, 0xffe98a, 0);
-      const faceS = sheep || gray ? 0.001 : down ? 0.55 : headS * 0.92;
-      pose(faceM, i, x + fx * (headS * 0.42), headY + 0.02, z + fz * (headS * 0.42), down ? 0.5 : 0, face, 0, faceS, faceS * 1.08, 1);
-      pose(blobM, i, x, y + 0.06, z, -Math.PI / 2, 0, 0, 0.85, 0.85, 0.85);
-      paint(blobM, i, 0x000000, 0);
+      pilots.place(i, figureSpec(a, x, y, z, ease, corpse?.charId));
     }
+    pilots.hideFrom(n);
+    mutants.hideFrom(zi);
     for (const mesh of [bodyM, headM, hairM, hairBackM, hairLM, hairRM, handM, handRM, footM, footRM, haloM, blobM, skirtM, wingLM, wingRM, packM, gunM]) {
-      mesh.count = n;
-      mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      mesh.count = 0;
     }
-    faceM.count = n;
-    faceM.instanceMatrix.needsUpdate = true;
+    faceM.count = 0;
     for (const mesh of [zBody, zHump, zHead, zJaw, zArmL, zArmR, zForeL, zForeR, zHandL, zHandR, zClawL, zClawR, zClawL2, zClawR2, zClawL3, zClawR3, zLegL, zLegR, zShinL, zShinR, zFootL, zFootR, zNeck, zBrow, zEarL, zEarR, zRib, zSpike, zBump, zBand, zShoulderL, zShoulderR, zRagL, zRagR]) {
-      mesh.count = zi;
-      mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      mesh.count = 0;
     }
-    zEye.count = zi;
-    zEye.instanceMatrix.needsUpdate = true;
-    zFace.count = zi;
-    zFace.instanceMatrix.needsUpdate = true;
-    balls.forEach((b, i) => {
-      if (i >= 40) return;
+    zEye.count = 0;
+    zFace.count = 0;
+    let ballShown = 0;
+    balls.forEach((b) => {
+      if (b.kind === "car") return;
+      if (ballShown >= 40) return;
       mat.compose(pos.set(b.x, b.y, b.z), quat.identity(), scl.set(1, 1, 1));
-      ballM.setMatrixAt(i, mat);
+      ballM.setMatrixAt(ballShown, mat);
       col.setHex(b.kind === "rocket" ? 0xff6a3d : b.kind === "laugh" ? 0xffe14a : 0x7af0ff);
-      ballM.setColorAt(i, col);
+      ballM.setColorAt(ballShown, col);
+      ballShown += 1;
     });
-    ballM.count = Math.min(40, balls.length);
+    ballM.count = ballShown;
     ballM.instanceMatrix.needsUpdate = true;
     if (ballM.instanceColor) ballM.instanceColor.needsUpdate = true;
+    const carCounts = carPools.map(() => 0);
+    for (const b of balls) {
+      if (b.kind !== "car") continue;
+      const mi = b.model % carPools.length;
+      const slot = carCounts[mi]!;
+      if (slot >= 8) continue;
+      carCounts[mi] = slot + 1;
+      eul.set(b.tilt, b.face, b.spin, "YXZ");
+      quat.setFromEuler(eul);
+      mat.compose(pos.set(b.x, b.y, b.z), quat, scl.set(1, 1, 1));
+      carPools[mi]!.setMatrixAt(slot, mat);
+    }
+    carPools.forEach((mesh, i) => {
+      mesh.count = carCounts[i] || 0;
+      mesh.instanceMatrix.needsUpdate = true;
+    });
     drones.forEach((d, i) => {
       if (i >= 16) return;
       mat.compose(pos.set(d.x, d.y, d.z), quat.identity(), scl.set(1, 1, 1));
@@ -3515,10 +3657,57 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     };
   }
 
-  function emit() {
-    pumpBanner();
-    const c = clockParts();
-    const rows = actors
+  const pings = new Map<string, { ms: number; at: number }>();
+
+  function rowKind(a: Actor) {
+    if (a.minion) return a.kind === "mummy" ? "mummy" : a.kind === "necro" ? "necro" : "mutant";
+    if (a.bot) return "bot";
+    return "human";
+  }
+
+  function pingOf(nick: string) {
+    return pings.get(nick)?.ms || 0;
+  }
+
+  function scoreRows() {
+    if (linked.length) {
+      const rows = linked.map((h) => ({
+        team: h.team,
+        name: h.nick,
+        lvl: h.lvl || xpToLevel(h.xp || 0).lvl,
+        rank: rankForLevel(h.lvl || xpToLevel(h.xp || 0).lvl).id,
+        k: h.kills || 0,
+        d: h.deaths || 0,
+        xp: Math.floor(h.xp || 0),
+        me: player?.name === h.nick,
+        kind: "human",
+        ping: pingOf(h.nick) || h.ping || 0,
+        charId: h.charId || "",
+      }));
+      if (player && !rows.some((r) => r.name === player!.name)) {
+        const self = player;
+        const lvl = xpToLevel(self.xp).lvl;
+        rows.push({ team: self.team, name: self.name, lvl, rank: rankForLevel(lvl).id, k: self.kills, d: self.deaths, xp: Math.floor(self.xp), me: true, kind: "human", ping: pingOf(self.name), charId: self.charId });
+      }
+      for (const a of actors) {
+        if (a.state === "gone" || (!a.bot && !a.minion)) continue;
+        rows.push({
+          team: a.team,
+          name: a.name,
+          lvl: xpToLevel(a.xp).lvl,
+          rank: rankForLevel(xpToLevel(a.xp).lvl).id,
+          k: a.kills,
+          d: a.deaths,
+          xp: Math.floor(a.xp),
+          me: false,
+          kind: rowKind(a),
+          ping: 0,
+          charId: a.minion ? "" : a.charId,
+        });
+      }
+      return rows;
+    }
+    return actors
       .filter((a) => a.state !== "gone")
       .map((a) => ({
         team: a.team,
@@ -3529,7 +3718,16 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
         d: a.deaths,
         xp: Math.floor(a.xp),
         me: a === player,
+        kind: rowKind(a),
+        ping: a === player ? pingOf(a.name) : 0,
+        charId: a.minion ? "" : a.charId,
       }));
+  }
+
+  function emit() {
+    pumpBanner();
+    const c = clockParts();
+    const rows = scoreRows();
     const weapon = player ? WEAPON_BY_ID[loadout(charOf(player))[player.weapon] || "plasma"]!.name : "Plasma Rifle";
     hud = {
       phase: playing ? "play" : "attract",
@@ -3567,10 +3765,12 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
 
   function applyQuality(q: Quality) {
     quality = q;
-    const pr = q === "low" ? 0.8 : q === "high" ? Math.min(1.6, window.devicePixelRatio || 1) : 1;
+    const pr = q === "low" ? 0.8 : q === "ultra" ? Math.min(1.75, window.devicePixelRatio || 1) : q === "high" ? Math.min(1.6, window.devicePixelRatio || 1) : 1;
     renderer.setPixelRatio(pr);
     renderer.shadowMap.enabled = false;
     sun.castShadow = false;
+    pilots.setUltra(q === "ultra");
+    mutants.setUltra(q === "ultra");
     flowerM.count = q === "low" ? Math.min(40, world.flowers.length) : world.flowers.length;
     grassM.count = q === "low" ? Math.min(30, world.grass.length) : world.grass.length;
   }
@@ -3700,6 +3900,7 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       edges.cycle = false;
       edges.dash = false;
     }
+    frameDt = dt;
     render();
     uiAcc += dt;
     if (uiAcc > 0.12) {
@@ -3797,7 +3998,9 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       actors.push(player);
       yaw = player.yaw;
       playing = true;
-      globalCall(`${info.nick} joined ${TEAMS[info.team]!.name}.`);
+      const self = player;
+      if (linked.length) syncHumans(linked.filter((h) => h.nick !== self.name));
+      line(`${info.nick} joined ${TEAMS[info.team]!.name}.`, true);
       globalCall("Instructor: Steal an enemy flag and bring it home. Guard your own.");
       globalCall("Instructor: Hold the yellow hill in the center for two minutes. Your team then runs faster.");
       installProbe();
@@ -3863,6 +4066,10 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       if (v) document.exitPointerLock();
       emit();
     },
+    intro() {
+      audio.unlock();
+      audio.intro();
+    },
     toggleSpectate() {
       toggleSpectate();
     },
@@ -3893,6 +4100,53 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     },
     pushAnnounce(s: string) {
       line(s, true);
+      emit();
+    },
+    setToken(next: string) {
+      token = next;
+    },
+    notePings(rows: { nick: string; ms: number }[]) {
+      const now = performance.now();
+      for (const row of rows) {
+        const prev = pings.get(row.nick);
+        if (prev && now - prev.at < 5000) continue;
+        pings.set(row.nick, { ms: Math.max(0, Math.round(row.ms)), at: now });
+      }
+      emit();
+    },
+    applyAfk(action: "spawn" | "kill") {
+      if (!player) return;
+      const self = player;
+      if (action === "spawn") {
+        const spots = world.spawns.filter((s) => s.team === self.team);
+        const s = spots[0] || world.spawns[0];
+        if (s) {
+          self.x = s.x;
+          self.y = s.y;
+          self.z = s.z;
+          self.vx = 0;
+          self.vy = 0;
+          self.vz = 0;
+        }
+        afkFix = true;
+        line("No update for 30 seconds. Back to spawn.", true);
+      } else {
+        player.hp = 0;
+        player.state = "down";
+        player.lifeStreak = 0;
+        player.spree = 0;
+        line("Still idle. You are down.", true);
+      }
+      emit();
+    },
+    applyRoster(pilots: RosterPilot[]) {
+      linked = Array.isArray(pilots) ? pilots : [];
+      if (player) {
+        const self = player;
+        syncHumans(linked.filter((h) => h.nick !== self.name));
+        const me = linked.find((h) => h.nick === self.name);
+        if (me) self.xp = Math.max(self.xp, me.xp || 0);
+      }
       emit();
     },
     failed: failWebgl,
