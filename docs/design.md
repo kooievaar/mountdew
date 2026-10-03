@@ -18,7 +18,7 @@ Three-team capture the flag on one desert map, played in the browser. Humans syn
 - Nicknames are the account. New names register at once. Passwords are salted on the relay and also remembered in this browser, as requested. Wrong password cannot take an existing name.
 - Voices stay local. You always hear your pilot. At most two other pilots and a handful of close guns. An announcer calls captures, returns, the hill, and rise. A commentator drops a short line every few seconds. Both fade if the camera leaves the field.
 - V detaches a spectator camera. WASD flies along the look direction, A is screen-left, Space up, Ctrl down, Shift faster. The pilot stays where they were until V again.
-- A match PC runs `node relay/server.mjs` (100 pilots, one process, accounts in relay/data.json). Paste that address into Match server. Leave it blank to play inside the browser.
+- A match PC runs `node host/server.mjs`. That one process serves the site and the relay at https://newsfeed.qzz.io:8888 (websocket on the same port). Clear Match server to play inside the browser. `node relay/server.mjs` is the relay alone.
 
 ## Map
 

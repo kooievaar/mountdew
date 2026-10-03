@@ -2,7 +2,7 @@ import { i as __toESM } from "../_runtime.mjs";
 import { b as require_jsx_runtime, q as require_react } from "../_libs/@tanstack/react-router+[...].mjs";
 import { n as TSS_SERVER_FUNCTION, r as getServerFnById, t as createServerFn } from "./ssr.mjs";
 import { a as Maximize2, c as Eye, i as Settings, o as Map$1, r as Terminal, s as List, t as X } from "../_libs/lucide-react.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/routes-D9CWujSi.js
+//#region node_modules/.nitro/vite/services/ssr/assets/routes-YLV7z2gV.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var __defProp = Object.defineProperty;
@@ -848,6 +848,8 @@ var REMEMBER = "mountdew.gate.v1";
 var REG = "mountdew.reg.v1";
 var GFX = "mountdew.gfx";
 var RELAY = "mountdew.relay";
+var PUBLIC_MATCH = "wss://newsfeed.qzz.io:8888";
+var PUBLIC_SITE = "https://newsfeed.qzz.io:8888";
 var ASCII = ` __  __  ___  _   _ _   _ _____
 |  \\/  |/ _ \\| | | | \\ | |_   _|
 | |\\/| | | | | | | |  \\| | | |
@@ -860,7 +862,8 @@ function Home() {
 	const gameRef = (0, import_react.useRef)(null);
 	const [nick, setNick] = (0, import_react.useState)("");
 	const [password, setPassword] = (0, import_react.useState)("");
-	const [relay, setRelay] = (0, import_react.useState)("");
+	const [relay, setRelay] = (0, import_react.useState)(PUBLIC_MATCH);
+	const [pilots, setPilots] = (0, import_react.useState)(null);
 	const [team, setTeam] = (0, import_react.useState)(0);
 	const [charId, setCharId] = (0, import_react.useState)("angel");
 	const [error, setError] = (0, import_react.useState)("");
@@ -890,12 +893,16 @@ function Home() {
 			}
 			const savedRelay = localStorage.getItem(RELAY);
 			if (savedRelay) setRelay(savedRelay);
+			else if (window.location.hostname === "newsfeed.qzz.io") setRelay(`wss://${window.location.host}`);
 		} catch {}
+		fetch("/health").then((res) => res.ok ? res.json() : null).then((body) => {
+			if (body && typeof body.pilots === "number") setPilots(body.pilots);
+		}).catch(() => {});
 		fetchBoard().then(setBoard).catch(() => setError("Relay quiet. You can still drop in locally."));
 		let dead = false;
 		let stop = () => {};
 		(async () => {
-			const mod = await import("./engine-D40DIVgo.mjs");
+			const mod = await import("./engine-bxOYh30I.mjs");
 			if (dead || !viewRef.current || !overlayRef.current) return;
 			const qa = new URLSearchParams(window.location.search).has("qa");
 			const game = mod.createGame(viewRef.current, overlayRef.current, { qa });
@@ -1040,6 +1047,12 @@ function Home() {
 			lookY
 		});
 	}
+	function jump(id) {
+		document.getElementById(id)?.scrollIntoView({
+			behavior: "smooth",
+			block: "start"
+		});
+	}
 	const play = phase === "play" && hud;
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("main", {
 		className: "dew",
@@ -1052,140 +1065,282 @@ function Home() {
 				ref: overlayRef,
 				className: "overlay"
 			}),
-			phase === "login" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+			phase === "login" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 				className: "login",
-				children: [
-					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
-						className: "panel",
-						children: [
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+				children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					className: "site",
+					children: [
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("header", {
+							className: "site-bar",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 								className: "kicker",
-								children: "1.0.1 · Amsterdam-IX · 100 seats"
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", { children: "Mount Dew" }),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
-								className: "cast",
-								src: "/game/cast.jpg",
-								alt: "Seraph Doll, Bluebelle, Noir Nyx, and Bestie Bea in the desert arena"
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-								className: "handle",
-								children: "@sugoimeg"
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-								className: "muted",
-								children: "Three teams. One hill. Flags that never sleep. Pick a pilot, a password, and drop in."
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-								className: "teams",
-								children: TEAMS.map((t) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-									className: team === t.id ? "choice on" : "choice",
-									onClick: () => setTeam(t.id),
-									type: "button",
-									children: t.name
-								}, t.id))
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-								className: "chars",
-								"aria-label": "Pilots",
-								children: CHARACTERS.map((c) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
-									className: charId === c.id ? "choice on" : "choice",
-									onClick: () => setCharId(c.id),
-									type: "button",
+								children: "Mount Dew"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", {
+								className: "brand-line",
+								children: "100 seats · three teams"
+							})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("nav", {
+								className: "site-nav",
+								children: [
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+										type: "button",
+										onClick: () => jump("howto"),
+										children: "How to play"
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+										type: "button",
+										onClick: () => jump("teams"),
+										children: "Teams"
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+										type: "button",
+										onClick: () => jump("ledger"),
+										children: "Ledger"
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+										className: "btn primary",
+										type: "button",
+										onClick: () => jump("drop"),
+										children: "Play"
+									})
+								]
+							})]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
+							className: "hero",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "hero-copy",
+								children: [
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+										className: "kicker",
+										children: PUBLIC_SITE
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", { children: "Mount Dew" }),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+										className: "lede",
+										children: "One desert. Three flags. A hill that pays if you hold it. The match stays up, and you can drop in from this page."
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
+										className: "cast",
+										src: "/game/cast.jpg",
+										alt: "Seraph Doll, Bluebelle, Noir Nyx, and Bestie Bea in the desert arena"
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+										className: "handle",
+										children: "@sugoimeg"
+									})
+								]
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
+								id: "drop",
+								className: "panel",
+								children: [
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+										className: "kicker",
+										children: "Start the match"
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", { children: "Drop in" }),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+										className: "teams",
+										children: TEAMS.map((t) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+											className: team === t.id ? "choice on" : "choice",
+											onClick: () => setTeam(t.id),
+											type: "button",
+											children: t.name
+										}, t.id))
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+										className: "chars",
+										"aria-label": "Pilots",
+										children: CHARACTERS.map((c) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+											className: charId === c.id ? "choice on" : "choice",
+											onClick: () => setCharId(c.id),
+											type: "button",
+											children: [
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+													className: "swatch",
+													style: { background: `#${c.hair.toString(16).padStart(6, "0")}` }
+												}),
+												c.name,
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: c.abilityName })
+											]
+										}, c.id))
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+										className: "muted",
+										children: CHARACTERS.find((c) => c.id === charId)?.blurb
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+										className: "field",
+										children: ["Nickname", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+											id: "nick",
+											autoComplete: "username",
+											value: nick,
+											onChange: (e) => setNick(e.target.value),
+											maxLength: 16,
+											suppressHydrationWarning: true
+										})]
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+										className: "field",
+										children: ["Password", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+											id: "pass",
+											type: "password",
+											autoComplete: "current-password",
+											value: password,
+											onChange: (e) => setPassword(e.target.value),
+											suppressHydrationWarning: true
+										})]
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+										className: "field",
+										children: ["Match server", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+											id: "relay",
+											autoComplete: "off",
+											placeholder: "Clear to play only in this browser",
+											value: relay,
+											onChange: (e) => setRelay(e.target.value),
+											suppressHydrationWarning: true
+										})]
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+										className: "muted",
+										children: pilots === null ? "The live match is already filled in. Clear the address to play alone in this browser." : `${pilots} of 100 pilots linked on the public match.`
+									}),
+									error ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+										className: "err",
+										children: error
+									}) : null,
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+										className: "btn primary",
+										type: "button",
+										disabled: busy,
+										onClick: () => {
+											const game = gameRef.current;
+											if (!game) return;
+											enter(game, nick, password, team, charId);
+										},
+										children: busy ? "Linking" : "Drop in"
+									})
+								]
+							})]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
+							id: "howto",
+							className: "panel",
+							children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", { children: "How to start" }),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("ol", {
+									className: "steps",
 									children: [
-										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-											className: "swatch",
-											style: { background: `#${c.hair.toString(16).padStart(6, "0")}` }
-										}),
-										c.name,
-										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: c.abilityName })
+										/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Open the site." }), " The game is this page. Nothing to install."] }),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Pick a team and a pilot." }), " Citrus holds the white stone, Voltage the space decks, Code Red the red city."] }),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Drop in." }), " A nickname and a password keep your rank. Then click the field to look."] })
 									]
-								}, c.id))
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-								className: "muted",
-								children: CHARACTERS.find((c) => c.id === charId)?.blurb
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
-								className: "field",
-								children: ["Nickname", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
-									id: "nick",
-									autoComplete: "username",
-									value: nick,
-									onChange: (e) => setNick(e.target.value),
-									maxLength: 16,
-									suppressHydrationWarning: true
-								})]
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
-								className: "field",
-								children: ["Password", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
-									id: "pass",
-									type: "password",
-									autoComplete: "current-password",
-									value: password,
-									onChange: (e) => setPassword(e.target.value),
-									suppressHydrationWarning: true
-								})]
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
-								className: "field",
-								children: ["Match server", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
-									id: "relay",
-									autoComplete: "off",
-									placeholder: "Blank plays in this browser",
-									value: relay,
-									onChange: (e) => setRelay(e.target.value),
-									suppressHydrationWarning: true
-								})]
-							}),
-							error ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-								className: "err",
-								children: error
-							}) : null,
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-								className: "btn primary",
-								type: "button",
-								disabled: busy,
-								onClick: () => {
-									const game = gameRef.current;
-									if (!game) return;
-									enter(game, nick, password, team, charId);
-								},
-								children: busy ? "Linking" : "Drop in"
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("pre", {
-								className: "ascii",
-								children: ASCII
-							})
-						]
-					}),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "login-gap" }),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
-						className: "panel",
-						children: [
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", { children: "Season ledger" }),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-								className: "muted",
-								children: "Scores kept by the relay. Empty seats on the field are match pilots until a person takes them."
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-								className: "ledger",
-								children: board.map((row) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-									className: "row",
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", { children: "On the field" }),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+									className: "help-grid",
 									children: [
-										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-											className: "swatch",
-											style: { background: TEAMS[row.team]?.color || "#c6e35a" }
-										}),
-										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: row.nick }),
-										/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [row.xp, " xp"] })
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "WASD" }),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Move. A is screen-left. Double-tap dodges." }),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Mouse" }),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Look and shoot. Shots meet the crosshair." }),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Space" }),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Jump, double jump, wall jump. F climbs a wall." }),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Shift" }),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Dash. Hold into a wall in the air to wallride." }),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "F / G" }),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Use the selected action, or cycle blocks, pads, turrets, and traps." }),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "V" }),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Fly the spectator camera. Voices fade as you leave." }),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Tab / M" }),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Scoreboard and map. Backtick opens the console." })
 									]
-								}, row.nick))
-							})
-						]
-					})
-				]
+								})
+							]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
+							id: "teams",
+							className: "panel",
+							children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", { children: "Three cities, one hill" }),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+									className: "trio",
+									children: TEAMS.map((t) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("article", {
+										className: "team-card",
+										children: [
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+												className: "swatch",
+												style: { background: t.color }
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", {
+												style: { color: t.color },
+												children: t.name
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+												className: "muted",
+												children: t.id === 0 ? "Coconut desert and white stone." : t.id === 1 ? "Space decks above the trench." : "Red stone city on the east mesa."
+											})
+										]
+									}, t.id))
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+									className: "muted",
+									children: "Hold the middle hill for two minutes and your team runs faster. Flags go home if they sit too long. Pinpop, Wrapley, and Bonecaller raise green mutants from fallen bodies. You hear your pilot, nearby guns, an announcer, and a commentator. A full field does not shout all at once."
+								})
+							]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
+							id: "ledger",
+							className: "panel",
+							children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", { children: "Season ledger" }),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+									className: "muted",
+									children: "Scores kept by the relay. Empty seats on the field are match pilots until a person takes them."
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+									className: "ledger",
+									children: [board.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+										className: "muted",
+										children: "No scores yet. The first drop-in opens the book."
+									}) : null, board.map((row) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+										className: "row",
+										children: [
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+												className: "swatch",
+												style: { background: TEAMS[row.team]?.color || "#c6e35a" }
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: row.nick }),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [row.xp, " xp"] })
+										]
+									}, row.nick))]
+								})
+							]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
+							className: "panel",
+							children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", { children: "Match PC" }),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+									className: "muted",
+									children: [
+										"The public address is ",
+										PUBLIC_SITE,
+										". On the machine that answers for newsfeed.qzz.io, start the site and the relay together with node host/server.mjs. It listens on port 8888. A certificate in host/certs keeps the lock trusted. Until then, the browser may ask you to continue once."
+									]
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+									className: "credit",
+									children: "MADE BY DAN"
+								})
+							]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("pre", {
+							className: "ascii",
+							children: ASCII
+						})
+					]
+				})
 			}) : null,
 			play ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 				className: "hud",
@@ -1488,7 +1643,7 @@ function Home() {
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Voices" }),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "You hear your pilot, the announcer, and a commentator. Other pilots and guns only if they are close, so a full field does not turn into noise." }),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Server" }),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Leave Match server blank to play here. To host 100 pilots, run node relay/server.mjs on the match PC and paste its address before you drop in." })
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "The live match is wss://newsfeed.qzz.io:8888. Clear Match server to play only in this browser. The match PC starts with node host/server.mjs." })
 								]
 							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 								className: "credit",

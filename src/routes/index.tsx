@@ -12,6 +12,8 @@ const REMEMBER = "mountdew.gate.v1";
 const REG = "mountdew.reg.v1";
 const GFX = "mountdew.gfx";
 const RELAY = "mountdew.relay";
+const PUBLIC_MATCH = "wss://newsfeed.qzz.io:8888";
+const PUBLIC_SITE = "https://newsfeed.qzz.io:8888";
 
 const ASCII = ` __  __  ___  _   _ _   _ _____
 |  \\/  |/ _ \\| | | | \\ | |_   _|
@@ -26,7 +28,8 @@ function Home() {
   const gameRef = useRef<GameHandle | null>(null);
   const [nick, setNick] = useState("");
   const [password, setPassword] = useState("");
-  const [relay, setRelay] = useState("");
+  const [relay, setRelay] = useState(PUBLIC_MATCH);
+  const [pilots, setPilots] = useState<number | null>(null);
   const [team, setTeam] = useState(0);
   const [charId, setCharId] = useState("angel");
   const [error, setError] = useState("");
@@ -49,8 +52,17 @@ function Home() {
       }
       const savedRelay = localStorage.getItem(RELAY);
       if (savedRelay) setRelay(savedRelay);
+      else if (window.location.hostname === "newsfeed.qzz.io") setRelay(`wss://${window.location.host}`);
     } catch {
       /* ignore bad local gate */
+    }
+    if (window.location.port === "8888" || window.location.hostname === "newsfeed.qzz.io") {
+      void fetch("/health")
+        .then((res) => (res.ok ? res.json() : null))
+        .then((body: { pilots?: number } | null) => {
+          if (body && typeof body.pilots === "number") setPilots(body.pilots);
+        })
+        .catch(() => {});
     }
     void fetchBoard()
       .then(setBoard)
@@ -155,6 +167,10 @@ function Home() {
     gameRef.current?.setTouch({ ...t, lookX, lookY });
   }
 
+  function jump(id: string) {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   const play = phase === "play" && hud;
   return (
     <main className="dew">
@@ -162,77 +178,165 @@ function Home() {
       <canvas ref={overlayRef} className="overlay" />
       {phase === "login" ? (
         <div className="login">
-          <section className="panel">
-            <p className="kicker">1.0.1 · Amsterdam-IX · 100 seats</p>
-            <h1>Mount Dew</h1>
-            <img className="cast" src="/game/cast.jpg" alt="Seraph Doll, Bluebelle, Noir Nyx, and Bestie Bea in the desert arena" />
-            <p className="handle">@sugoimeg</p>
-            <p className="muted">Three teams. One hill. Flags that never sleep. Pick a pilot, a password, and drop in.</p>
-            <div className="teams">
-              {TEAMS.map((t) => (
-                <button key={t.id} className={team === t.id ? "choice on" : "choice"} onClick={() => setTeam(t.id)} type="button">
-                  {t.name}
+          <div className="site">
+            <header className="site-bar">
+              <div>
+                <p className="kicker">Mount Dew</p>
+                <strong className="brand-line">100 seats · three teams</strong>
+              </div>
+              <nav className="site-nav">
+                <button type="button" onClick={() => jump("howto")}>
+                  How to play
                 </button>
-              ))}
-            </div>
-            <div className="chars" aria-label="Pilots">
-              {CHARACTERS.map((c) => (
-                <button key={c.id} className={charId === c.id ? "choice on" : "choice"} onClick={() => setCharId(c.id)} type="button">
-                  <span className="swatch" style={{ background: `#${c.hair.toString(16).padStart(6, "0")}` }} />
-                  {c.name}
-                  <small>{c.abilityName}</small>
+                <button type="button" onClick={() => jump("teams")}>
+                  Teams
                 </button>
-              ))}
-            </div>
-            <p className="muted">{CHARACTERS.find((c) => c.id === charId)?.blurb}</p>
-            <label className="field">
-              Nickname
-              <input id="nick" autoComplete="username" value={nick} onChange={(e) => setNick(e.target.value)} maxLength={16} suppressHydrationWarning />
-            </label>
-            <label className="field">
-              Password
-              <input id="pass" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} suppressHydrationWarning />
-            </label>
-            <label className="field">
-              Match server
-              <input
-                id="relay"
-                autoComplete="off"
-                placeholder="Blank plays in this browser"
-                value={relay}
-                onChange={(e) => setRelay(e.target.value)}
-                suppressHydrationWarning
-              />
-            </label>
-            {error ? <p className="err">{error}</p> : null}
-            <button
-              className="btn primary"
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                const game = gameRef.current;
-                if (!game) return;
-                void enter(game, nick, password, team, charId);
-              }}
-            >
-              {busy ? "Linking" : "Drop in"}
-            </button>
-            <pre className="ascii">{ASCII}</pre>
-          </section>
-          <div className="login-gap" />
-          <section className="panel">
-            <h2>Season ledger</h2>
-            <p className="muted">Scores kept by the relay. Empty seats on the field are match pilots until a person takes them.</p>
-            <div className="ledger">
-              {board.map((row) => (
-                <div className="row" key={row.nick}>
-                  <span className="swatch" style={{ background: TEAMS[row.team]?.color || "#c6e35a" }} />
-                  <span>{row.nick}</span>
-                  <span>{row.xp} xp</span>
+                <button type="button" onClick={() => jump("ledger")}>
+                  Ledger
+                </button>
+                <button className="btn primary" type="button" onClick={() => jump("drop")}>
+                  Play
+                </button>
+              </nav>
+            </header>
+            <section className="hero">
+              <div className="hero-copy">
+                <p className="kicker">{PUBLIC_SITE}</p>
+                <h1>Mount Dew</h1>
+                <p className="lede">One desert. Three flags. A hill that pays if you hold it. The match stays up, and you can drop in from this page.</p>
+                <img className="cast" src="/game/cast.jpg" alt="Seraph Doll, Bluebelle, Noir Nyx, and Bestie Bea in the desert arena" />
+                <p className="handle">@sugoimeg</p>
+              </div>
+              <section id="drop" className="panel">
+                <p className="kicker">Start the match</p>
+                <h2>Drop in</h2>
+                <div className="teams">
+                  {TEAMS.map((t) => (
+                    <button key={t.id} className={team === t.id ? "choice on" : "choice"} onClick={() => setTeam(t.id)} type="button">
+                      {t.name}
+                    </button>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </section>
+                <div className="chars" aria-label="Pilots">
+                  {CHARACTERS.map((c) => (
+                    <button key={c.id} className={charId === c.id ? "choice on" : "choice"} onClick={() => setCharId(c.id)} type="button">
+                      <span className="swatch" style={{ background: `#${c.hair.toString(16).padStart(6, "0")}` }} />
+                      {c.name}
+                      <small>{c.abilityName}</small>
+                    </button>
+                  ))}
+                </div>
+                <p className="muted">{CHARACTERS.find((c) => c.id === charId)?.blurb}</p>
+                <label className="field">
+                  Nickname
+                  <input id="nick" autoComplete="username" value={nick} onChange={(e) => setNick(e.target.value)} maxLength={16} suppressHydrationWarning />
+                </label>
+                <label className="field">
+                  Password
+                  <input id="pass" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} suppressHydrationWarning />
+                </label>
+                <label className="field">
+                  Match server
+                  <input
+                    id="relay"
+                    autoComplete="off"
+                    placeholder="Clear to play only in this browser"
+                    value={relay}
+                    onChange={(e) => setRelay(e.target.value)}
+                    suppressHydrationWarning
+                  />
+                </label>
+                <p className="muted">
+                  {pilots === null
+                    ? "The live match is already filled in. Clear the address to play alone in this browser."
+                    : `${pilots} of 100 pilots linked on the public match.`}
+                </p>
+                {error ? <p className="err">{error}</p> : null}
+                <button
+                  className="btn primary"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    const game = gameRef.current;
+                    if (!game) return;
+                    void enter(game, nick, password, team, charId);
+                  }}
+                >
+                  {busy ? "Linking" : "Drop in"}
+                </button>
+              </section>
+            </section>
+            <section id="howto" className="panel">
+              <h2>How to start</h2>
+              <ol className="steps">
+                <li>
+                  <strong>Open the site.</strong> The game is this page. Nothing to install.
+                </li>
+                <li>
+                  <strong>Pick a team and a pilot.</strong> Citrus holds the white stone, Voltage the space decks, Code Red the red city.
+                </li>
+                <li>
+                  <strong>Drop in.</strong> A nickname and a password keep your rank. Then click the field to look.
+                </li>
+              </ol>
+              <h2>On the field</h2>
+              <div className="help-grid">
+                <span>WASD</span>
+                <span>Move. A is screen-left. Double-tap dodges.</span>
+                <span>Mouse</span>
+                <span>Look and shoot. Shots meet the crosshair.</span>
+                <span>Space</span>
+                <span>Jump, double jump, wall jump. F climbs a wall.</span>
+                <span>Shift</span>
+                <span>Dash. Hold into a wall in the air to wallride.</span>
+                <span>F / G</span>
+                <span>Use the selected action, or cycle blocks, pads, turrets, and traps.</span>
+                <span>V</span>
+                <span>Fly the spectator camera. Voices fade as you leave.</span>
+                <span>Tab / M</span>
+                <span>Scoreboard and map. Backtick opens the console.</span>
+              </div>
+            </section>
+            <section id="teams" className="panel">
+              <h2>Three cities, one hill</h2>
+              <div className="trio">
+                {TEAMS.map((t) => (
+                  <article key={t.id} className="team-card">
+                    <span className="swatch" style={{ background: t.color }} />
+                    <h3 style={{ color: t.color }}>{t.name}</h3>
+                    <p className="muted">
+                      {t.id === 0 ? "Coconut desert and white stone." : t.id === 1 ? "Space decks above the trench." : "Red stone city on the east mesa."}
+                    </p>
+                  </article>
+                ))}
+              </div>
+              <p className="muted">
+                Hold the middle hill for two minutes and your team runs faster. Flags go home if they sit too long. Pinpop, Wrapley, and Bonecaller raise green mutants from fallen bodies. You hear your pilot, nearby guns, an announcer, and a commentator. A full field does not shout all at once.
+              </p>
+            </section>
+            <section id="ledger" className="panel">
+              <h2>Season ledger</h2>
+              <p className="muted">Scores kept by the relay. Empty seats on the field are match pilots until a person takes them.</p>
+              <div className="ledger">
+                {board.length === 0 ? <p className="muted">No scores yet. The first drop-in opens the book.</p> : null}
+                {board.map((row) => (
+                  <div className="row" key={row.nick}>
+                    <span className="swatch" style={{ background: TEAMS[row.team]?.color || "#c6e35a" }} />
+                    <span>{row.nick}</span>
+                    <span>{row.xp} xp</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+            <section className="panel">
+              <h2>Match PC</h2>
+              <p className="muted">
+                The public address is {PUBLIC_SITE}. On the machine that answers for newsfeed.qzz.io, start the site and the relay together with node host/server.mjs. It listens on port 8888. A certificate in host/certs keeps the lock trusted. Until then, the browser may ask you to continue once.
+              </p>
+              <p className="credit">MADE BY DAN</p>
+            </section>
+            <pre className="ascii">{ASCII}</pre>
+          </div>
         </div>
       ) : null}
       {play ? (
@@ -432,7 +536,7 @@ function Home() {
                     <span>Voices</span>
                     <span>You hear your pilot, the announcer, and a commentator. Other pilots and guns only if they are close, so a full field does not turn into noise.</span>
                     <span>Server</span>
-                    <span>Leave Match server blank to play here. To host 100 pilots, run node relay/server.mjs on the match PC and paste its address before you drop in.</span>
+                    <span>The live match is wss://newsfeed.qzz.io:8888. Clear Match server to play only in this browser. The match PC starts with node host/server.mjs.</span>
                   </div>
                   <p className="credit">MADE BY DAN</p>
                 </div>

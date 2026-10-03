@@ -11,7 +11,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join as pathJoin } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -242,53 +242,63 @@ function takeFrame(buf) {
 
 const sockets = new Set();
 
-const server = createServer((req, res) => {
-  if (req.url === "/health") {
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, pilots: humans.size, cap: MAX_PILOTS }));
-    return;
-  }
-  res.writeHead(200, { "content-type": "text/plain" });
-  res.end("Mount Dew relay. Open a websocket on this port.");
-});
+export function relayHealth() {
+  return { ok: true, pilots: humans.size, cap: MAX_PILOTS, site: "https://newsfeed.qzz.io:8888" };
+}
 
-server.on("upgrade", (req, socket) => {
-  const key = String(req.headers["sec-websocket-key"] || "");
-  if (!key) {
-    socket.destroy();
-    return;
-  }
-  socket.write(
-    "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + acceptKey(key) + "\r\n\r\n",
-  );
-  sockets.add(socket);
-  let buf = Buffer.alloc(0);
-  socket.on("data", (chunk) => {
-    buf = Buffer.concat([buf, chunk]);
-    while (true) {
-      const frame = takeFrame(buf);
-      if (!frame) break;
-      buf = buf.subarray(frame.used);
-      if (frame.opcode === 8) {
-        socket.end();
-        return;
-      }
-      if (frame.opcode === 9) {
-        const pong = Buffer.alloc(2);
-        pong[0] = 0x8a;
-        pong[1] = 0;
-        socket.write(pong);
-        continue;
-      }
-      if (frame.opcode === 1) onJson(socket, frame.payload.toString("utf8"));
+export function attachRelay(server) {
+  server.on("upgrade", (req, socket) => {
+    const key = String(req.headers["sec-websocket-key"] || "");
+    if (!key) {
+      socket.destroy();
+      return;
     }
+    socket.write(
+      "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + acceptKey(key) + "\r\n\r\n",
+    );
+    sockets.add(socket);
+    let buf = Buffer.alloc(0);
+    socket.on("data", (chunk) => {
+      buf = Buffer.concat([buf, chunk]);
+      while (true) {
+        const frame = takeFrame(buf);
+        if (!frame) break;
+        buf = buf.subarray(frame.used);
+        if (frame.opcode === 8) {
+          socket.end();
+          return;
+        }
+        if (frame.opcode === 9) {
+          const pong = Buffer.alloc(2);
+          pong[0] = 0x8a;
+          pong[1] = 0;
+          socket.write(pong);
+          continue;
+        }
+        if (frame.opcode === 1) onJson(socket, frame.payload.toString("utf8"));
+      }
+    });
+    socket.on("close", () => sockets.delete(socket));
+    socket.on("error", () => sockets.delete(socket));
   });
-  socket.on("close", () => sockets.delete(socket));
-  socket.on("error", () => sockets.delete(socket));
-});
+}
 
 load();
 setInterval(save, 15000);
-server.listen(PORT, HOST, () => {
-  console.log(`Mount Dew relay on ${HOST}:${PORT}  (${MAX_PILOTS} pilots)`);
-});
+
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
+  const server = createServer((req, res) => {
+    if (req.url === "/health") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(relayHealth()));
+      return;
+    }
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end("Mount Dew relay. The site and the match share https://newsfeed.qzz.io:8888 via node host/server.mjs");
+  });
+  attachRelay(server);
+  server.listen(PORT, HOST, () => {
+    console.log(`Mount Dew relay on ${HOST}:${PORT}  (${MAX_PILOTS} pilots)`);
+  });
+}
