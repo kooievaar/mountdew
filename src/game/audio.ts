@@ -1,8 +1,11 @@
+import workletSource from "../../public/game/mixer-worklet.js?raw";
+
 export type AudioBus = {
   unlock: () => void;
   setVolume: (v: number) => void;
   setListener: (x: number, y: number, z: number) => void;
   jump: (pitch: number) => void;
+  hopAt: (x: number, y: number, z: number, pitch: number) => void;
   step: (water: boolean) => void;
   shot: (kind: string) => void;
   shotAt: (x: number, y: number, z: number, kind: string, self: boolean) => void;
@@ -34,224 +37,340 @@ export type AudioBus = {
 const HEAR = 28;
 const HEAR_FULL = 7;
 
+const ID = {
+  jump: 0,
+  land: 1,
+  shot: 2,
+  rocket: 3,
+  flame: 4,
+  melee: 5,
+  boom: 6,
+  splash: 7,
+  train: 8,
+  step: 9,
+  water: 10,
+  ding: 11,
+  bird: 12,
+  owl: 13,
+  a: 14,
+  e: 15,
+  i: 16,
+  o: 17,
+  u: 18,
+  laugh: 19,
+  wind: 20,
+  rain: 21,
+} as const;
+
+type Item = {
+  id: number;
+  delay: number;
+  gain: number;
+  rate: number;
+  pan: number;
+  lane: number;
+  loop?: boolean;
+};
+
+const VOWEL: Record<string, number> = { a: ID.a, e: ID.e, i: ID.i, o: ID.o, u: ID.u };
+
 export function createAudio(): AudioBus {
   let ctx: AudioContext | null = null;
   let master: GainNode | null = null;
-  let sfxBus: GainNode | null = null;
-  let voiceBus: GainNode | null = null;
-  let boothBus: GainNode | null = null;
-  let noiseBuf: AudioBuffer | null = null;
+  let worldBus: GainNode | null = null;
+  let node: AudioWorkletNode | null = null;
   let vol = 0.7;
-  let wind: AudioBufferSourceNode | null = null;
-  let stepAcc = 0;
-  let laughAcc = 0;
-  const ear = { x: 0, y: 8, z: 0 };
-  let mixOn = 0;
-  const MAX_MIX = 400;
+  let mode: "boot" | "worklet" | "buffer" = "boot";
+  let started = false;
+  let windOn = false;
   let introDone = false;
+  let stepAcc = 0;
+  let rainAcc = 0;
+  const ear = { x: 0, y: 8, z: 0 };
+  const pcm: Float32Array[] = [];
+  const banks: AudioBuffer[] = [];
+  const batch: Item[] = [];
+  let flushQueued = false;
 
-  function ac() {
-    if (!ctx) {
-      const C = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      ctx = new C();
-      master = ctx.createGain();
-      master.gain.value = vol;
-      master.connect(ctx.destination);
-      const comp = ctx.createDynamicsCompressor();
-      comp.threshold.value = -16;
-      comp.knee.value = 18;
-      comp.ratio.value = 8;
-      comp.attack.value = 0.004;
-      comp.release.value = 0.22;
-      comp.connect(master);
-      sfxBus = ctx.createGain();
-      sfxBus.gain.value = 0.8;
-      sfxBus.connect(comp);
-      voiceBus = ctx.createGain();
-      voiceBus.gain.value = 1;
-      voiceBus.connect(comp);
-      boothBus = ctx.createGain();
-      boothBus.gain.value = 1;
-      boothBus.connect(comp);
-      const len = ctx.sampleRate * 2;
-      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-      const data = buf.getChannelData(0);
-      for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
-      const src = ctx.createBufferSource();
-      src.buffer = buf;
-      src.loop = true;
-      const filter = ctx.createBiquadFilter();
-      filter.type = "lowpass";
-      filter.frequency.value = 400;
-      const g = ctx.createGain();
-      g.gain.value = 0.025;
-      src.connect(filter);
-      filter.connect(g);
-      g.connect(master);
-      src.start();
-      wind = src;
+  function rng(seed: number) {
+    let s = seed >>> 0;
+    return () => {
+      s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+      return s / 4294967296;
+    };
+  }
+
+  function normalize(data: Float32Array, amp: number) {
+    let peak = 0;
+    for (let i = 0; i < data.length; i++) peak = Math.max(peak, Math.abs(data[i]));
+    if (peak < 1e-5) return data;
+    const g = amp / peak;
+    for (let i = 0; i < data.length; i++) data[i] *= g;
+    return data;
+  }
+
+  function chirp(sr: number, f0: number, f1: number, dur: number, amp: number) {
+    const len = Math.max(1, Math.floor(sr * dur));
+    const b = new Float32Array(len);
+    let ph = 0;
+    for (let i = 0; i < len; i++) {
+      const k = i / len;
+      const f = f0 * Math.pow(f1 / f0, k);
+      ph += (2 * Math.PI * f) / sr;
+      const env = Math.min(1, i / (sr * 0.01)) * Math.pow(1 - k, 1.15);
+      b[i] = Math.sin(ph) * env;
     }
-    if (ctx.state === "suspended") void ctx.resume();
-    return ctx;
+    return normalize(b, amp);
   }
 
-  function envGain(duration: number, peak: number, bus?: GainNode | null) {
-    const c = ac();
-    const g = c.createGain();
-    g.connect(bus || sfxBus || master!);
-    const t = c.currentTime;
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(Math.max(0.001, peak), t + 0.015);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + Math.max(0.04, duration));
-    return { c, g, t };
-  }
-
-  function tone(freq: number, dur: number, type: OscillatorType, peak: number, slide = 0, bus?: GainNode | null) {
-    if (peak < 0.004) return;
-    const { c, g, t } = envGain(dur, peak, bus);
-    const o = c.createOscillator();
-    o.type = type;
-    o.frequency.setValueAtTime(Math.max(40, freq), t);
-    if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, freq + slide), t + dur);
-    o.connect(g);
-    o.start(t);
-    o.stop(t + dur + 0.02);
-  }
-
-  function noise(dur: number, peak: number, freq: number) {
-    if (peak < 0.004) return;
-    const c = ac();
-    if (!noiseBuf) {
-      noiseBuf = c.createBuffer(1, c.sampleRate, c.sampleRate);
-      const data = noiseBuf.getChannelData(0);
-      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  function noise(sr: number, dur: number, cut: number, amp: number, seed: number) {
+    const len = Math.max(1, Math.floor(sr * dur));
+    const b = new Float32Array(len);
+    const next = rng(seed);
+    let y = 0;
+    const c = Math.min(0.92, cut);
+    for (let i = 0; i < len; i++) {
+      const white = next() * 2 - 1;
+      y += c * (white - y);
+      const k = i / len;
+      const env = Math.min(1, i / (sr * 0.006)) * (1 - k);
+      b[i] = y * env;
     }
-    const src = c.createBufferSource();
-    src.buffer = noiseBuf;
-    src.loop = true;
-    const filter = c.createBiquadFilter();
-    filter.type = "bandpass";
-    filter.frequency.value = freq;
-    filter.Q.value = 0.8;
-    const { g, t } = envGain(dur, peak, sfxBus);
-    src.connect(filter);
-    filter.connect(g);
-    const offset = Math.random() * Math.max(0, noiseBuf.duration - dur);
-    src.start(t, offset);
-    src.stop(t + dur + 0.02);
+    return normalize(b, amp);
   }
 
-  function sequence(notes: number[], step: number, type: OscillatorType, peak: number) {
-    notes.forEach((f, i) => {
-      window.setTimeout(() => tone(f, step * 0.9, type, peak), i * step * 1000);
-    });
+  function vowel(sr: number, f0: number, formants: number[], amp: number) {
+    const len = Math.max(1, Math.floor(sr * 0.12));
+    const b = new Float32Array(len);
+    const ph = new Array(formants.length + 1).fill(0);
+    for (let i = 0; i < len; i++) {
+      const k = i / len;
+      const env = Math.min(1, i / (sr * 0.01)) * Math.pow(1 - k, 0.65);
+      ph[0] += (2 * Math.PI * f0) / sr;
+      let s = Math.sin(ph[0]) * 0.55;
+      for (let f = 0; f < formants.length; f++) {
+        ph[f + 1] += (2 * Math.PI * formants[f]) / sr;
+        s += Math.sin(ph[f + 1]) * (0.22 - f * 0.04);
+      }
+      const n = ((i * 17) % 100) / 100 - 0.5;
+      const bite = i < sr * 0.018 ? n * (1 - i / (sr * 0.018)) * 0.35 : 0;
+      b[i] = (s + bite) * env;
+    }
+    return normalize(b, amp);
   }
 
-  function distGain(x: number, y: number, z: number, far = HEAR) {
-    const d = Math.hypot(x - ear.x, y - ear.y, z - ear.z);
-    if (d <= HEAR_FULL) return 1;
-    if (d >= far) return 0;
-    const t = (d - HEAR_FULL) / (far - HEAR_FULL);
-    return (1 - t) * (1 - t);
+  function laughLine(sr: number) {
+    const syl = [520, 640, 560, 820, 940, 800, 500, 630, 560];
+    const gap = 0.145;
+    const sylDur = 0.12;
+    const len = Math.floor(sr * (syl.length * gap + 0.05));
+    const b = new Float32Array(len);
+    for (let n = 0; n < syl.length; n++) {
+      const start = Math.floor(sr * n * gap);
+      const count = Math.floor(sr * sylDur);
+      let ph = 0;
+      let ph2 = 0;
+      const f = syl[n];
+      for (let i = 0; i < count && start + i < len; i++) {
+        const k = i / count;
+        const env = Math.min(1, i / (sr * 0.014)) * (1 - k) * (1 - k);
+        ph += (2 * Math.PI * f) / sr;
+        ph2 += (2 * Math.PI * f * 2.02) / sr;
+        b[start + i] += (Math.sin(ph) * 0.72 + Math.sin(ph2) * 0.28) * env;
+      }
+    }
+    return normalize(b, 0.95);
   }
 
-  function boothGain() {
-    const alt = Math.max(0, ear.y - 16);
-    const edge = Math.max(0, Math.hypot(ear.x, ear.z) - 108);
-    const d = Math.hypot(alt, edge);
-    if (d < 8) return 1;
-    if (d > 72) return 0;
-    return 1 - (d - 8) / 64;
+  function push(data: Float32Array) {
+    pcm.push(data);
+    const ab = ctx!.createBuffer(1, data.length, ctx!.sampleRate);
+    ab.getChannelData(0).set(data);
+    banks.push(ab);
   }
 
-  function talk(text: string, pitch: number, peak: number, form: "pilot" | "booth" | "color") {
+  function buildBuffers() {
+    if (!ctx || pcm.length) return;
+    const sr = ctx.sampleRate;
+    push(chirp(sr, 320, 880, 0.15, 0.95));
+    push(chirp(sr, 180, 70, 0.2, 0.9));
+    push(noise(sr, 0.09, 0.55, 0.8, 3));
+    push(noise(sr, 0.22, 0.18, 0.9, 9));
+    push(noise(sr, 0.1, 0.72, 0.75, 12));
+    push(chirp(sr, 220, 90, 0.08, 0.8));
+    push(noise(sr, 0.38, 0.12, 0.95, 21));
+    push(noise(sr, 0.16, 0.62, 0.7, 33));
+    push(noise(sr, 0.2, 0.16, 0.6, 40));
+    push(noise(sr, 0.05, 0.35, 0.55, 51));
+    push(noise(sr, 0.1, 0.48, 0.6, 62));
+    push(chirp(sr, 880, 1320, 0.12, 0.8));
+    push(chirp(sr, 1400, 1800, 0.07, 0.55));
+    push(chirp(sr, 420, 240, 0.28, 0.7));
+    push(vowel(sr, 200, [800, 1200, 2600], 0.95));
+    push(vowel(sr, 200, [500, 1900, 2500], 0.95));
+    push(vowel(sr, 200, [320, 2300, 3000], 0.95));
+    push(vowel(sr, 180, [500, 900, 2400], 0.95));
+    push(vowel(sr, 180, [350, 800, 2200], 0.95));
+    push(laughLine(sr));
+    push(noise(sr, 2.0, 0.08, 0.4, 70));
+    push(noise(sr, 0.35, 0.7, 0.45, 88));
+  }
+
+  function schedule() {
+    if (flushQueued) return;
+    flushQueued = true;
+    queueMicrotask(flush);
+  }
+
+  function flush() {
+    flushQueued = false;
+    if (mode !== "worklet" || !node || !batch.length) return;
+    const items = batch.splice(0, batch.length);
+    node.port.postMessage({ cmd: "batch", items });
+  }
+
+  function fallback(it: Item) {
+    if (!ctx || !master || !banks[it.id]) return;
+    const src = ctx.createBufferSource();
+    src.buffer = banks[it.id];
+    src.playbackRate.value = Math.max(0.25, it.rate || 1);
+    src.loop = !!it.loop;
+    const g = ctx.createGain();
+    const when = ctx.currentTime + Math.max(0, it.delay || 0);
+    g.gain.setValueAtTime(Math.max(0.001, it.gain), when);
+    src.connect(g);
+    const bus = it.lane ? master : worldBus || master;
+    if (!it.lane && ctx.createStereoPanner) {
+      const p = ctx.createStereoPanner();
+      p.pan.setValueAtTime(Math.max(-1, Math.min(1, it.pan || 0)), when);
+      g.connect(p);
+      p.connect(bus);
+    } else g.connect(bus);
+    src.start(when);
+    if (!it.loop) {
+      const dur = banks[it.id].duration / Math.max(0.25, it.rate || 1);
+      src.stop(when + dur + 0.03);
+    }
+  }
+
+  function kick(it: Item) {
+    if (it.gain < 0.004) return;
+    if (!ctx) boot();
+    if (ctx && ctx.state === "suspended") void ctx.resume();
+    if (mode === "worklet") {
+      batch.push(it);
+      schedule();
+      return;
+    }
+    fallback(it);
+  }
+
+  function boot() {
+    if (started) return;
+    started = true;
+    const C = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    ctx = new C();
+    master = ctx.createGain();
+    master.gain.value = vol;
+    master.connect(ctx.destination);
+    worldBus = ctx.createGain();
+    worldBus.gain.value = 0.9;
+    const lim = ctx.createDynamicsCompressor();
+    lim.threshold.value = -3;
+    lim.knee.value = 4;
+    lim.ratio.value = 1.5;
+    lim.attack.value = 0.002;
+    lim.release.value = 0.06;
+    worldBus.connect(lim);
+    lim.connect(master);
+    buildBuffers();
+    const url = URL.createObjectURL(new Blob([workletSource], { type: "application/javascript" }));
+    void ctx.audioWorklet
+      .addModule(url)
+      .then(() => {
+        URL.revokeObjectURL(url);
+        if (!ctx || !master) return;
+        try {
+          node = new AudioWorkletNode(ctx, "dew-mixer", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
+        } catch {
+          node = new AudioWorkletNode(ctx, "dew-mixer");
+        }
+        node.connect(master);
+        node.port.postMessage({ cmd: "bufs", bufs: pcm });
+        mode = "worklet";
+        armWind();
+        flush();
+      })
+      .catch(() => {
+        URL.revokeObjectURL(url);
+        mode = "buffer";
+        armWind();
+      });
+  }
+
+  function armWind() {
+    if (windOn) return;
+    windOn = true;
+    kick({ id: ID.wind, delay: 0, gain: 0.045, rate: 1, pan: 0, lane: 0, loop: true });
+  }
+
+  function place(x: number, y: number, z: number, far = HEAR) {
+    const dx = x - ear.x;
+    const dy = y - ear.y;
+    const dz = z - ear.z;
+    const d = Math.hypot(dx, dy, dz);
+    let g = 1;
+    if (d > HEAR_FULL) {
+      if (d >= far) g = 0;
+      else {
+        const t = (d - HEAR_FULL) / (far - HEAR_FULL);
+        g = (1 - t) * (1 - t);
+      }
+    }
+    return { g, pan: Math.max(-1, Math.min(1, dx / 26)) };
+  }
+
+  function rateOf(pitch: number) {
+    return Math.max(0.45, Math.min(2.5, pitch / 200));
+  }
+
+  function speak(text: string, pitch: number, gain: number, lane: number, pan: number, gap: number) {
     const words = text
       .toLowerCase()
       .replace(/[^a-z0-9 ]/g, "")
       .split(/\s+/)
       .filter(Boolean)
-      .slice(0, 18);
-    if (!words.length || peak < 0.004) return 80;
-    const bus = form === "pilot" ? voiceBus : boothBus;
-    const gap = form === "color" ? 0.11 : form === "booth" ? 0.15 : 0.12;
-    const type: OscillatorType = form === "booth" ? "triangle" : "sine";
-    const base = form === "booth" ? Math.max(150, pitch) : form === "color" ? pitch : pitch;
-    const c = ac();
-    const start = c.currentTime + 0.03;
+      .slice(0, 14);
+    if (!words.length || gain < 0.004) return;
+    const rate = rateOf(pitch);
+    let t = 0.02;
     let n = 0;
-    words.forEach((word, wi) => {
-      const syl = Math.min(4, Math.max(1, Math.ceil(word.length / 3)));
+    for (const word of words) {
+      const syl = Math.min(3, Math.max(1, Math.ceil(word.length / 3)));
       for (let i = 0; i < syl; i++) {
-        const ch = word[Math.min(word.length - 1, i)] || "a";
-        const vowel = ch === "i" || ch === "e" ? 1.35 : ch === "o" || ch === "u" ? 0.78 : ch === "a" ? 1.08 : 0.95;
-        const when = start + (n + wi * 0.2) * gap;
-        const f = Math.max(80, base * vowel);
-        const dur = gap * 0.92;
-        const g = c.createGain();
-        g.connect(bus || master!);
-        g.gain.setValueAtTime(0.0001, when);
-        g.gain.exponentialRampToValueAtTime(Math.max(0.001, peak), when + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
-        const o = c.createOscillator();
-        o.type = type;
-        o.frequency.setValueAtTime(f, when);
-        o.frequency.exponentialRampToValueAtTime(Math.max(70, f * (form === "pilot" ? 1.06 : 0.94)), when + dur);
-        o.connect(g);
-        o.start(when);
-        o.stop(when + dur + 0.02);
-        const h = c.createOscillator();
-        const hg = c.createGain();
-        hg.connect(bus || master!);
-        hg.gain.setValueAtTime(0.0001, when);
-        hg.gain.exponentialRampToValueAtTime(Math.max(0.001, peak * 0.28), when + 0.02);
-        hg.gain.exponentialRampToValueAtTime(0.0001, when + dur * 0.8);
-        h.type = "sine";
-        h.frequency.setValueAtTime(f * 2, when);
-        h.connect(hg);
-        h.start(when);
-        h.stop(when + dur);
+        if (n >= 36) return;
+        const slice = word.slice(i * 3, i * 3 + 3);
+        const v = (slice.match(/[aeiou]/) || ["a"])[0];
+        const scale = v === "i" ? 1.22 : v === "e" ? 1.08 : v === "o" || v === "u" ? 0.84 : 1;
+        kick({ id: VOWEL[v] || ID.a, delay: t, gain, rate: rate * scale, pan, lane });
+        t += gap;
         n++;
       }
-    });
-    return Math.max(280, (n + words.length * 0.2) * gap * 1000 + 80);
+      t += gap * 0.42;
+    }
   }
 
-  function holdMix(ms: number) {
-    if (mixOn >= MAX_MIX) return false;
-    mixOn++;
-    window.setTimeout(() => {
-      mixOn = Math.max(0, mixOn - 1);
-    }, Math.max(40, ms));
-    return true;
-  }
-
-  function playBooth(text: string, form: "booth" | "color") {
-    if (!holdMix(1600)) return;
-    const g = form === "booth" ? Math.max(0.75, boothGain()) : Math.max(0.4, boothGain());
-    const pitch = form === "booth" ? 210 : 320;
-    talk(text, pitch, (form === "booth" ? 0.14 : 0.1) * g, form);
-  }
-
-  function queueBooth(text: string, form: "booth" | "color") {
-    if (!text || mixOn >= MAX_MIX) return;
-    playBooth(text, form);
-  }
-
-  function announceLine(text: string) {
-    return text.replace(/\s+/g, " ").trim().slice(0, 180);
-  }
-
-  function shotBody(kind: string, peak: number) {
-    if (kind === "trace") noise(0.07, peak, 1400);
-    else if (kind === "rocket") noise(0.2, peak, 220);
-    else if (kind === "flame") noise(0.08, peak * 0.7, 700);
-    else if (kind === "melee") tone(180, 0.08, "square", peak * 0.6);
-    else noise(0.1, peak * 0.8, 600);
+  function shotId(kind: string) {
+    if (kind === "rocket") return ID.rocket;
+    if (kind === "flame") return ID.flame;
+    if (kind === "melee") return ID.melee;
+    return ID.shot;
   }
 
   return {
     unlock() {
-      ac();
+      boot();
+      if (ctx && ctx.state === "suspended") void ctx.resume();
     },
     setVolume(v: number) {
       vol = v;
@@ -263,151 +382,151 @@ export function createAudio(): AudioBus {
       ear.z = z;
     },
     jump(pitch: number) {
-      tone(pitch, 0.16, "sine", 0.08, pitch * 0.4);
+      if (pitch < 250) kick({ id: ID.land, delay: 0, gain: 0.62, rate: 1, pan: 0, lane: 2 });
+      else kick({ id: ID.jump, delay: 0, gain: 0.78, rate: Math.max(0.75, Math.min(1.7, pitch / 480)), pan: 0, lane: 2 });
+    },
+    hopAt(x: number, y: number, z: number, pitch: number) {
+      const p = place(x, y, z, 22);
+      if (p.g < 0.02) return;
+      kick({ id: ID.jump, delay: 0, gain: 0.28 * p.g, rate: Math.max(0.7, Math.min(1.7, pitch / 480)), pan: p.pan, lane: 0 });
     },
     step(water: boolean) {
-      noise(water ? 0.12 : 0.05, water ? 0.07 : 0.04, water ? 500 : 180);
+      kick({ id: water ? ID.water : ID.step, delay: 0, gain: water ? 0.16 : 0.1, rate: 0.9 + Math.random() * 0.2, pan: 0, lane: 0 });
     },
     shot(kind: string) {
-      shotBody(kind, 0.09);
+      kick({ id: shotId(kind), delay: 0, gain: 0.34, rate: 1, pan: 0, lane: 0 });
     },
     shotAt(x: number, y: number, z: number, kind: string, self: boolean) {
-      const g = self ? Math.max(0.9, distGain(x, y, z, 36)) : distGain(x, y, z, 36);
-      if (g < 0.02 || !holdMix(120)) return;
-      shotBody(kind, 0.1 * g);
+      const p = self ? { g: 1, pan: 0 } : place(x, y, z, 40);
+      if (p.g < 0.02) return;
+      kick({ id: shotId(kind), delay: 0, gain: (self ? 0.4 : 0.3) * p.g, rate: 0.92 + Math.random() * 0.16, pan: p.pan, lane: 0 });
     },
     ding() {
-      tone(880, 0.12, "sine", 0.08);
-      tone(1320, 0.18, "triangle", 0.05);
+      kick({ id: ID.ding, delay: 0, gain: 0.42, rate: 1, pan: 0, lane: 2 });
+      kick({ id: ID.ding, delay: 0.08, gain: 0.34, rate: 1.5, pan: 0, lane: 2 });
     },
     boom() {
-      noise(0.28, 0.12, 140);
-      tone(90, 0.22, "sine", 0.08, -40);
+      kick({ id: ID.boom, delay: 0, gain: 0.7, rate: 1, pan: 0, lane: 0 });
     },
     boomAt(x: number, y: number, z: number) {
-      const g = distGain(x, y, z, 40);
-      if (g < 0.02 || !holdMix(320)) return;
-      noise(0.28, 0.12 * g, 140);
-      tone(90, 0.22, "sine", 0.08 * g, -40);
+      const p = place(x, y, z, 48);
+      if (p.g < 0.02) return;
+      kick({ id: ID.boom, delay: 0, gain: 0.72 * p.g, rate: 1, pan: p.pan, lane: 0 });
     },
     voice(pitch: number, kind: string) {
-      sequence([pitch, pitch * 1.25], 0.09, "sine", 0.07);
-      void kind;
+      speak(kind || "hey", pitch, 0.46, 1, 0, 0.09);
     },
     voiceAt(x: number, y: number, z: number, pitch: number, kind: string, line: string, self: boolean) {
-      const g = self ? 1 : distGain(x, y, z, 24);
-      if (g < 0.02 || !holdMix(900)) return;
-      const phrase = line || kind || "hey";
-      const ms = talk(phrase, Math.max(90, pitch), 0.16 * g, "pilot");
-      void ms;
+      const p = self ? { g: 1, pan: 0 } : place(x, y, z, 30);
+      if (p.g < 0.02) return;
+      speak(line || kind || "hey", pitch, (self ? 0.56 : 0.34) * p.g, self ? 1 : 0, p.pan, self ? 0.092 : 0.078);
     },
     help(pitch: number) {
-      sequence([pitch, pitch * 0.8, pitch], 0.14, "sine", 0.07);
+      speak("help", pitch, 0.5, 1, 0, 0.1);
     },
     helpAt(x: number, y: number, z: number, pitch: number, self: boolean) {
-      const g = self ? 1 : distGain(x, y, z, 22);
-      if (g < 0.02 || !holdMix(700)) return;
-      talk("help", Math.max(90, pitch), 0.12 * g, "pilot");
+      const p = self ? { g: 1, pan: 0 } : place(x, y, z, 28);
+      if (p.g < 0.02) return;
+      speak("help", pitch, (self ? 0.52 : 0.32) * p.g, self ? 1 : 0, p.pan, 0.1);
     },
     splash() {
-      noise(0.18, 0.08, 900);
+      kick({ id: ID.splash, delay: 0, gain: 0.22, rate: 1, pan: 0, lane: 0 });
     },
     splashAt(x: number, y: number, z: number) {
-      const g = distGain(x, y, z, 22);
-      if (g < 0.02 || !holdMix(200)) return;
-      noise(0.18, 0.08 * g, 900);
+      const p = place(x, y, z, 24);
+      if (p.g < 0.02) return;
+      kick({ id: ID.splash, delay: 0, gain: 0.24 * p.g, rate: 1, pan: p.pan, lane: 0 });
     },
     laugh() {
-      tone(500 + Math.random() * 200, 0.1, "square", 0.04, 80);
+      kick({ id: ID.laugh, delay: 0, gain: 0.4, rate: 1, pan: 0, lane: 0 });
     },
     laughAt(x: number, y: number, z: number) {
-      const g = distGain(x, y, z, 22);
-      if (g < 0.02 || !holdMix(200)) return;
-      tone(500 + Math.random() * 200, 0.1, "square", 0.045 * g, 80);
+      const p = place(x, y, z, 24);
+      if (p.g < 0.02) return;
+      kick({ id: ID.laugh, delay: 0, gain: 0.36 * p.g, rate: 1, pan: p.pan, lane: 0 });
     },
     giggle(x: number, y: number, z: number) {
-      const g = distGain(x, y, z, 26);
-      if (g < 0.02 || !holdMix(1400)) return;
-      talk("Hahaha Hihihi Hahaha", 620, 0.18 * g, "pilot");
+      const p = place(x, y, z, 32);
+      const g = Math.max(p.g, 0.55);
+      kick({ id: ID.laugh, delay: 0, gain: 0.62 * g, rate: 1.04, pan: p.pan, lane: 2 });
     },
     train() {
-      noise(0.16, 0.05, 120);
-      tone(440, 0.2, "triangle", 0.03);
+      kick({ id: ID.train, delay: 0, gain: 0.16, rate: 1, pan: 0, lane: 0 });
     },
     trainAt(x: number, y: number, z: number) {
-      const g = distGain(x, y, z, 46);
-      if (g < 0.02 || !holdMix(200)) return;
-      noise(0.16, 0.05 * g, 120);
-      tone(440, 0.2, "triangle", 0.035 * g);
+      const p = place(x, y, z, 52);
+      if (p.g < 0.02) return;
+      kick({ id: ID.train, delay: 0, gain: 0.18 * p.g, rate: 1, pan: p.pan, lane: 0 });
     },
     stinger() {
-      sequence([523, 659, 784], 0.09, "triangle", 0.05 * boothGain());
+      kick({ id: ID.ding, delay: 0, gain: 0.4, rate: 0.8, pan: 0, lane: 2 });
+      kick({ id: ID.ding, delay: 0.09, gain: 0.36, rate: 1, pan: 0, lane: 2 });
+      kick({ id: ID.ding, delay: 0.18, gain: 0.42, rate: 1.25, pan: 0, lane: 2 });
     },
     announce(text: string) {
-      const line = announceLine(text);
+      const line = text.replace(/\s+/g, " ").trim().slice(0, 180);
       if (!line) return;
-      queueBooth(line, "booth");
+      kick({ id: ID.ding, delay: 0, gain: 0.28, rate: 0.72, pan: 0, lane: 2 });
+      speak(line, 168, 0.62, 1, 0, 0.108);
     },
     intro() {
-      const c = ac();
-      const speak = () => {
+      boot();
+      const speakIntro = () => {
         if (introDone) return;
         introDone = true;
         const roll = Math.floor(Math.random() * 3);
-        const pitch = roll === 0 ? 96 : roll === 1 ? 230 : 410;
-        const form = roll === 0 ? "booth" : roll === 1 ? "color" : "pilot";
-        talk("Mount Dew Ow yes", pitch, 0.22, form);
+        const pitch = roll === 0 ? 150 : roll === 1 ? 240 : 360;
+        speak("Mount Dew Ow yes", pitch, 0.7, 1, 0, 0.12);
       };
-      if (c.state !== "running") {
-        void c.resume().then(speak);
+      if (ctx && ctx.state !== "running") {
+        void ctx.resume().then(speakIntro);
         return;
       }
-      speak();
+      speakIntro();
     },
     comment(text: string) {
-      queueBooth(text, "color");
+      const line = text.replace(/\s+/g, " ").trim().slice(0, 180);
+      if (!line) return;
+      speak(line, 250, 0.5, 1, 0, 0.1);
     },
     weather(kind: string) {
-      const g = boothGain();
-      if (kind === "rain") noise(0.4, 0.04 * g, 1000);
-      else if (kind === "snow") tone(1200, 0.2, "sine", 0.02 * g);
-      else tone(660, 0.15, "sine", 0.03 * g);
+      if (kind === "rain") kick({ id: ID.rain, delay: 0, gain: 0.12, rate: 1, pan: 0, lane: 0 });
+      else if (kind === "snow") kick({ id: ID.bird, delay: 0, gain: 0.06, rate: 0.7, pan: 0, lane: 0 });
+      else kick({ id: ID.ding, delay: 0, gain: 0.08, rate: 0.6, pan: 0, lane: 0 });
     },
     owl() {
-      const g = boothGain();
-      tone(330, 0.25, "sine", 0.05 * g, -80);
-      window.setTimeout(() => tone(280, 0.3, "sine", 0.04 * g, -60), 280);
+      kick({ id: ID.owl, delay: 0, gain: 0.16, rate: 1, pan: 0.2, lane: 0 });
+      kick({ id: ID.owl, delay: 0.32, gain: 0.14, rate: 0.86, pan: -0.15, lane: 0 });
     },
     birds() {
-      sequence([1400, 1800, 1500], 0.07, "sine", 0.03 * boothGain());
+      kick({ id: ID.bird, delay: 0, gain: 0.1, rate: 1, pan: 0.3, lane: 0 });
+      kick({ id: ID.bird, delay: 0.08, gain: 0.08, rate: 1.25, pan: -0.2, lane: 0 });
+      kick({ id: ID.bird, delay: 0.16, gain: 0.07, rate: 0.9, pan: 0.1, lane: 0 });
     },
     tick(dt: number, weather: string, moving: boolean, water: boolean) {
       if (!ctx) return;
       if (moving) {
         stepAcc += dt;
-        const every = water ? 0.28 : 0.34;
-        if (stepAcc > every) {
+        if (stepAcc > (water ? 0.28 : 0.34)) {
           stepAcc = 0;
-          noise(water ? 0.1 : 0.04, 0.035, water ? 480 : 160);
+          kick({ id: water ? ID.water : ID.step, delay: 0, gain: 0.1, rate: 0.85 + Math.random() * 0.3, pan: 0, lane: 0 });
         }
       }
       if (weather === "rain") {
-        laughAcc += dt;
-        if (laughAcc > 0.45) {
-          laughAcc = 0;
-          noise(0.12, 0.015 * boothGain(), 1500);
+        rainAcc += dt;
+        if (rainAcc > 0.45) {
+          rainAcc = 0;
+          kick({ id: ID.rain, delay: 0, gain: 0.05, rate: 0.8 + Math.random() * 0.4, pan: Math.random() * 1.4 - 0.7, lane: 0 });
         }
       }
     },
     dispose() {
-      try {
-        wind?.stop();
-      } catch {
-        /* already stopped */
-      }
+      mode = "buffer";
+      batch.length = 0;
       void ctx?.close();
       ctx = null;
       master = null;
+      node = null;
     },
   };
 }

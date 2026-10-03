@@ -1298,7 +1298,8 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       a.jumps = 1;
       a.riding = false;
       say(a, "jump");
-      audio.jump(charOf(a).voice);
+      if (a === player) audio.jump(charOf(a).voice);
+      else audio.hopAt(a.x, a.y + 1, a.z, charOf(a).voice);
       return;
     }
     if (a.jumps < maxJ) {
@@ -1307,7 +1308,8 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       a.roll = 0.48;
       a.grounded = false;
       say(a, a.jumps >= 3 ? "triple" : "double");
-      audio.jump(charOf(a).voice * 1.15);
+      if (a === player) audio.jump(charOf(a).voice * 1.15);
+      else audio.hopAt(a.x, a.y + 1, a.z, charOf(a).voice);
       return;
     }
     if (charOf(a).ability === "bird" && a.fuel > 0.05) {
