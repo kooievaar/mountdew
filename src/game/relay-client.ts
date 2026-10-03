@@ -19,15 +19,35 @@ type PulseIn = {
   shots: { ox: number; oy: number; oz: number; dx: number; dy: number; dz: number; dmg: number }[];
 };
 
-let bound: { pulse: (body: PulseIn) => Promise<PulseResult>; close: () => void } | null = null;
+export type ChatLine = { nick: string; team: number; text: string };
 
-export function bindRelay(next: { pulse: (body: PulseIn) => Promise<PulseResult>; close: () => void } | null) {
+type RelayLink = {
+  pulse: (body: PulseIn) => Promise<PulseResult>;
+  close: () => void;
+  chat: (text: string) => void;
+};
+
+let bound: RelayLink | null = null;
+const chatFns = new Set<(line: ChatLine) => void>();
+
+export function bindRelay(next: RelayLink | null) {
   bound?.close();
   bound = next;
 }
 
 export function relayBound() {
   return !!bound;
+}
+
+export function sendRelayChat(text: string) {
+  bound?.chat(text);
+}
+
+export function onRelayChat(fn: (line: ChatLine) => void) {
+  chatFns.add(fn);
+  return () => {
+    chatFns.delete(fn);
+  };
 }
 
 export async function netPulse(body: PulseIn): Promise<PulseResult> {
@@ -37,7 +57,7 @@ export async function netPulse(body: PulseIn): Promise<PulseResult> {
 
 type Waiter = { ok: (msg: Record<string, unknown>) => void; fail: (err: Error) => void };
 
-export function connectRelay(url: string): Promise<RelayHandle & { pulse: (body: PulseIn) => Promise<PulseResult> }> {
+export function connectRelay(url: string): Promise<RelayHandle & RelayLink> {
   return new Promise((resolve, reject) => {
     let sock: WebSocket;
     try {
@@ -70,10 +90,12 @@ export function connectRelay(url: string): Promise<RelayHandle & { pulse: (body:
     sock.addEventListener("open", () => {
       opened = true;
       window.clearTimeout(timer);
+      let token = "";
       const handle = {
         async join(nick: string, password: string, team: number, charId: string): Promise<JoinResult> {
           const msg = await send("join", { nick, password, team, charId });
           if (msg.ok !== true) return { ok: false, error: String(msg.error || "Join failed.") };
+          token = String(msg.token || "");
           const profile = msg.profile as {
             nick: string;
             xp: number;
@@ -83,12 +105,17 @@ export function connectRelay(url: string): Promise<RelayHandle & { pulse: (body:
             team: number;
             charId: string;
           };
-          return { ok: true, token: String(msg.token || ""), profile, board: Array.isArray(msg.board) ? (msg.board as BoardRow[]) : [] };
+          return { ok: true, token, profile, board: Array.isArray(msg.board) ? (msg.board as BoardRow[]) : [] };
         },
         async pulse(body: PulseIn): Promise<PulseResult> {
           const msg = await send("pulse", body);
           if (!msg.ok) return { ok: false, error: String(msg.error || "Pulse failed.") };
           return msg as unknown as PulseResult;
+        },
+        chat(text: string) {
+          const clean = text.replace(/\s+/g, " ").trim().slice(0, 160);
+          if (!token || !clean) return;
+          sock.send(JSON.stringify({ op: "chat", id: seq++, token, text: clean }));
         },
         close() {
           sock.close();
@@ -103,6 +130,11 @@ export function connectRelay(url: string): Promise<RelayHandle & { pulse: (body:
       try {
         msg = JSON.parse(String(ev.data)) as Record<string, unknown>;
       } catch {
+        return;
+      }
+      if (msg.op === "chat" && typeof msg.nick === "string" && typeof msg.text === "string") {
+        const line = { nick: msg.nick.slice(0, 16), team: Number(msg.team) || 0, text: msg.text.slice(0, 160) };
+        for (const fn of chatFns) fn(line);
         return;
       }
       const id = Number(msg.id);

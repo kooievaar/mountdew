@@ -2,7 +2,7 @@ import { i as __toESM } from "../_runtime.mjs";
 import { b as require_jsx_runtime, q as require_react } from "../_libs/@tanstack/react-router+[...].mjs";
 import { n as TSS_SERVER_FUNCTION, r as getServerFnById, t as createServerFn } from "./ssr.mjs";
 import { a as Maximize2, c as Eye, i as Settings, o as Map$1, r as Terminal, s as List, t as X } from "../_libs/lucide-react.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/routes-DAiI3QOT.js
+//#region node_modules/.nitro/vite/services/ssr/assets/routes-Dy37HWDw.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var __defProp = Object.defineProperty;
@@ -36,9 +36,22 @@ var joinMount = createServerFn({ method: "POST" }).validator((input) => ({
 })).handler(createSsrRpc("7f0f5192eafa87df62a9a26a998e8b403257215abb90756e135fc90ee16d8925"));
 var pulseMount = createServerFn({ method: "POST" }).validator((input) => input).handler(createSsrRpc("1287837d9f5e5647a3b5b13e52250686e368193d74072347df5a97c9c571f25c"));
 var bound = null;
+var chatFns = /* @__PURE__ */ new Set();
 function bindRelay(next) {
 	bound?.close();
 	bound = next;
+}
+function relayBound() {
+	return !!bound;
+}
+function sendRelayChat(text) {
+	bound?.chat(text);
+}
+function onRelayChat(fn) {
+	chatFns.add(fn);
+	return () => {
+		chatFns.delete(fn);
+	};
 }
 async function netPulse(body) {
 	if (bound) return bound.pulse(body);
@@ -82,6 +95,7 @@ function connectRelay(url) {
 		sock.addEventListener("open", () => {
 			opened = true;
 			window.clearTimeout(timer);
+			let token = "";
 			const handle = {
 				async join(nick, password, team, charId) {
 					const msg = await send("join", {
@@ -94,10 +108,11 @@ function connectRelay(url) {
 						ok: false,
 						error: String(msg.error || "Join failed.")
 					};
+					token = String(msg.token || "");
 					const profile = msg.profile;
 					return {
 						ok: true,
-						token: String(msg.token || ""),
+						token,
 						profile,
 						board: Array.isArray(msg.board) ? msg.board : []
 					};
@@ -109,6 +124,16 @@ function connectRelay(url) {
 						error: String(msg.error || "Pulse failed.")
 					};
 					return msg;
+				},
+				chat(text) {
+					const clean = text.replace(/\s+/g, " ").trim().slice(0, 160);
+					if (!token || !clean) return;
+					sock.send(JSON.stringify({
+						op: "chat",
+						id: seq++,
+						token,
+						text: clean
+					}));
 				},
 				close() {
 					sock.close();
@@ -122,6 +147,15 @@ function connectRelay(url) {
 			try {
 				msg = JSON.parse(String(ev.data));
 			} catch {
+				return;
+			}
+			if (msg.op === "chat" && typeof msg.nick === "string" && typeof msg.text === "string") {
+				const line = {
+					nick: msg.nick.slice(0, 16),
+					team: Number(msg.team) || 0,
+					text: msg.text.slice(0, 160)
+				};
+				for (const fn of chatFns) fn(line);
 				return;
 			}
 			const id = Number(msg.id);
@@ -881,6 +915,8 @@ function Home() {
 	const [board, setBoard] = (0, import_react.useState)([]);
 	const [hud, setHud] = (0, import_react.useState)(null);
 	const [tab, setTab] = (0, import_react.useState)("help");
+	const [chat, setChat] = (0, import_react.useState)([]);
+	const [draft, setDraft] = (0, import_react.useState)("");
 	const touch = (0, import_react.useRef)({
 		x: 0,
 		y: 0,
@@ -890,6 +926,9 @@ function Home() {
 		cycle: false,
 		dash: false
 	});
+	const chatLogRef = (0, import_react.useRef)(null);
+	const chatInputRef = (0, import_react.useRef)(null);
+	const chatSeq = (0, import_react.useRef)(1);
 	(0, import_react.useEffect)(() => {
 		try {
 			const raw = localStorage.getItem(REMEMBER);
@@ -918,7 +957,7 @@ function Home() {
 		let dead = false;
 		let stop = () => {};
 		(async () => {
-			const mod = await import("./engine-s_zIlh0R.mjs");
+			const mod = await import("./engine-DqBok1TO.mjs");
 			if (dead || !viewRef.current || !overlayRef.current) return;
 			const qa = new URLSearchParams(window.location.search).has("qa");
 			const game = mod.createGame(viewRef.current, overlayRef.current, { qa });
@@ -937,6 +976,43 @@ function Home() {
 			gameRef.current = null;
 		};
 	}, []);
+	(0, import_react.useEffect)(() => onRelayChat((line) => {
+		setChat((prev) => [...prev, {
+			...line,
+			id: chatSeq.current++
+		}].slice(-40));
+	}), []);
+	(0, import_react.useEffect)(() => {
+		const el = chatLogRef.current;
+		if (el) el.scrollTop = el.scrollHeight;
+	}, [chat]);
+	(0, import_react.useEffect)(() => {
+		if (phase !== "play") return;
+		const onKey = (e) => {
+			const tag = e.target?.tagName;
+			if (tag === "INPUT" || tag === "TEXTAREA") return;
+			if (e.code !== "Enter") return;
+			e.preventDefault();
+			document.exitPointerLock();
+			chatInputRef.current?.focus();
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [phase]);
+	function submitChat(e) {
+		e.preventDefault();
+		const text = draft.replace(/\s+/g, " ").trim().slice(0, 160);
+		if (!text) return;
+		setDraft("");
+		if (relayBound()) sendRelayChat(text);
+		else setChat((prev) => [...prev, {
+			id: chatSeq.current++,
+			nick: nick.trim() || "You",
+			team,
+			text
+		}].slice(-40));
+		chatInputRef.current?.blur();
+	}
 	async function enter(game, name, pass, teamId, hero, qa = false) {
 		setBusy(true);
 		setError("");
@@ -1243,7 +1319,7 @@ function Home() {
 									}),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 										className: "muted",
-										children: serverLive[SERVERS[0]] == null ? "Primary is wss://mountdew.oops.wtf:8888. If it is quiet, drop-in tries the fallback, then the third server. Clear the address to play alone in this browser." : `${serverLive[SERVERS[0]]} of 100 pilots on the primary match.`
+										children: serverLive[SERVERS[0]] == null ? "Primary is wss://mountdew.oops.wtf:8888. If it is quiet, drop-in tries the fallback, then the third server. Clear the address to play alone in this browser." : `${serverLive[SERVERS[0]]} of 1000 pilots on the primary match.`
 									}),
 									error ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 										className: "err",
@@ -1282,6 +1358,8 @@ function Home() {
 									children: [
 										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "WASD" }),
 										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Move. A is screen-left. Double-tap dodges." }),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Enter" }),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Chat. Escape leaves the box. Everyone in the match sees it." }),
 										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Mouse" }),
 										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Look and shoot. Shots meet the crosshair." }),
 										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Space" }),
@@ -1491,6 +1569,39 @@ function Home() {
 							]
 						})]
 					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
+						className: "chat",
+						"aria-label": "Match chat",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "chat-log",
+							ref: chatLogRef,
+							children: [chat.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+								className: "muted",
+								children: "Enter to chat. The match can read it."
+							}) : null, chat.map((line) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("b", {
+									style: { color: TEAMS[line.team]?.color || "#f7f4ea" },
+									children: line.nick
+								}),
+								" ",
+								line.text
+							] }, line.id))]
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("form", {
+							onSubmit: submitChat,
+							children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+								ref: chatInputRef,
+								value: draft,
+								maxLength: 160,
+								placeholder: "Chat",
+								"aria-label": "Chat",
+								onChange: (e) => setDraft(e.target.value),
+								onFocus: () => document.exitPointerLock(),
+								onKeyDown: (e) => {
+									if (e.key === "Escape") e.currentTarget.blur();
+								}
+							})
+						})]
+					}),
 					!hud.locked && !hud.menu && !hud.score && !hud.map && !hud.console ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
 						className: "btn primary look",
 						type: "button",
@@ -1676,6 +1787,8 @@ function Home() {
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Scoreboard, map, console. Esc options." }),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "V" }),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Spectator camera. WASD flies, Space up, Ctrl down, Shift boosts. World voices and shots fade as you fly away. V returns you to your pilot." }),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Enter" }),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Chat. Escape leaves the box. The line goes to every pilot in the match." }),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Voices" }),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "You hear your pilot, the announcer, and a commentator. Other pilots and guns only if they are close, so a full field does not turn into noise." }),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Server" }),
@@ -1697,7 +1810,7 @@ function Home() {
 								}),
 								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 									className: "muted",
-									children: "Mount Dew is a nonstop three-team capture match. Citrus holds the white stone and the coconut desert, Voltage the space decks, Code Red the red stone city. The hill in the middle pays a speed surge if a team keeps it for two minutes. Rise rites pull green mutants out of fallen bodies. An announcer calls the flags and a commentator talks over the nearby fight. Fly the spectator camera and the field goes quiet as you leave it. The match PC can host a hundred pilots. Your nickname stays in this browser. Rank and score updates go through the relay so a refreshed page cannot invent them."
+									children: "Mount Dew is a nonstop three-team capture match. Citrus holds the white stone and the coconut desert, Voltage the space decks, Code Red the red stone city. The hill in the middle pays a speed surge if a team keeps it for two minutes. Rise rites pull green mutants out of fallen bodies. An announcer calls the flags and a commentator talks over the nearby fight. Fly the spectator camera and the field goes quiet as you leave it. The match PC can host a thousand pilots in one room. Your nickname stays in this browser. Rank and score updates go through the relay so a refreshed page cannot invent them."
 								})
 							] }) : null
 						]

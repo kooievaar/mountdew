@@ -532,6 +532,52 @@
   pointer-events: auto;
 }
 
+.chat {
+  position: absolute;
+  left: 16px;
+  top: 88px;
+  width: min(340px, calc(100% - 32px));
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  color: #f7f4ea;
+}
+
+.chat-log {
+  max-height: 168px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-log p {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.chat form {
+  display: flex;
+}
+
+.chat input {
+  width: 100%;
+  min-height: 40px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.55);
+  color: #f7f4ea;
+  padding: 0 10px;
+  font: 500 0.95rem/1.2 var(--font-sans);
+}
+
 .touch {
   display: none;
   position: absolute;

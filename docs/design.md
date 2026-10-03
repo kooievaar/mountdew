@@ -18,7 +18,7 @@ Three-team capture the flag on one desert map, played in the browser. Humans syn
 - Nicknames are the account. New names register at once. Passwords are salted on the relay and also remembered in this browser, as requested. Wrong password cannot take an existing name.
 - Voices stay local. You always hear your pilot. At most two other pilots and a handful of close guns. An announcer calls captures, returns, the hill, and rise. A commentator drops a short line every few seconds. Both fade if the camera leaves the field.
 - V detaches a spectator camera. WASD flies along the look direction, A is screen-left, Space up, Ctrl down, Shift faster. The pilot stays where they were until V again.
-- The website is https://mountdew.oops.wtf. Drop-in tries wss://mountdew.oops.wtf:8888, then wss://mountdew.groups.id:8888, then wss://mountdew.tantrum.org:8888. Those three are listed on the start page. A match PC runs `node host/server.mjs`. Clear Match server to play inside the browser.
+- The website is https://mountdew.oops.wtf. Drop-in tries wss://mountdew.oops.wtf:8888, then wss://mountdew.groups.id:8888, then wss://mountdew.tantrum.org:8888. Those three are one room, capped at 1000 pilots. A player already inside does not block the next connection. A match PC runs `node host/server.mjs`. Clear Match server to play inside the browser.
 
 ## Map
 

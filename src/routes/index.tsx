@@ -1,9 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type PointerEvent } from "react";
 import { Eye, List, Map, Maximize2, Settings, Terminal, X } from "lucide-react";
 import { CHARACTERS, TEAMS } from "@/game/content";
 import type { GameHandle, HudState, Quality } from "@/game/engine";
-import { bindRelay, connectRelay } from "@/game/relay-client";
+import { bindRelay, connectRelay, onRelayChat, relayBound, sendRelayChat } from "@/game/relay-client";
 import { fetchBoard, joinMount, type BoardRow } from "@/lib/mount-api";
 
 export const Route = createFileRoute("/")({ component: Home });
@@ -43,7 +43,12 @@ function Home() {
   const [board, setBoard] = useState<BoardRow[]>([]);
   const [hud, setHud] = useState<HudState | null>(null);
   const [tab, setTab] = useState<"help" | "about" | "graphics">("help");
+  const [chat, setChat] = useState<{ id: number; nick: string; team: number; text: string }[]>([]);
+  const [draft, setDraft] = useState("");
   const touch = useRef({ x: 0, y: 0, fire: false, jump: false, act: false, cycle: false, dash: false });
+  const chatLogRef = useRef<HTMLDivElement>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
+  const chatSeq = useRef(1);
 
   useEffect(() => {
     try {
@@ -99,6 +104,39 @@ function Home() {
       gameRef.current = null;
     };
   }, []);
+
+  useEffect(() => onRelayChat((line) => {
+    setChat((prev) => [...prev, { ...line, id: chatSeq.current++ }].slice(-40));
+  }), []);
+
+  useEffect(() => {
+    const el = chatLogRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [chat]);
+
+  useEffect(() => {
+    if (phase !== "play") return;
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (e.code !== "Enter") return;
+      e.preventDefault();
+      document.exitPointerLock();
+      chatInputRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [phase]);
+
+  function submitChat(e: FormEvent) {
+    e.preventDefault();
+    const text = draft.replace(/\s+/g, " ").trim().slice(0, 160);
+    if (!text) return;
+    setDraft("");
+    if (relayBound()) sendRelayChat(text);
+    else setChat((prev) => [...prev, { id: chatSeq.current++, nick: nick.trim() || "You", team, text }].slice(-40));
+    chatInputRef.current?.blur();
+  }
 
   async function enter(game: GameHandle, name: string, pass: string, teamId: number, hero: string, qa = false) {
     setBusy(true);
@@ -278,7 +316,7 @@ function Home() {
                 <p className="muted">
                   {serverLive[SERVERS[0]] == null
                     ? "Primary is wss://mountdew.oops.wtf:8888. If it is quiet, drop-in tries the fallback, then the third server. Clear the address to play alone in this browser."
-                    : `${serverLive[SERVERS[0]]} of 100 pilots on the primary match.`}
+                    : `${serverLive[SERVERS[0]]} of 1000 pilots on the primary match.`}
                 </p>
                 {error ? <p className="err">{error}</p> : null}
                 <button
@@ -312,6 +350,8 @@ function Home() {
               <div className="help-grid">
                 <span>WASD</span>
                 <span>Move. A is screen-left. Double-tap dodges.</span>
+                <span>Enter</span>
+                <span>Chat. Escape leaves the box. Everyone in the match sees it.</span>
                 <span>Mouse</span>
                 <span>Look and shoot. Shots meet the crosshair.</span>
                 <span>Space</span>
@@ -425,6 +465,30 @@ function Home() {
               </button>
             </div>
           </div>
+          <section className="chat" aria-label="Match chat">
+            <div className="chat-log" ref={chatLogRef}>
+              {chat.length === 0 ? <p className="muted">Enter to chat. The match can read it.</p> : null}
+              {chat.map((line) => (
+                <p key={line.id}>
+                  <b style={{ color: TEAMS[line.team]?.color || "#f7f4ea" }}>{line.nick}</b> {line.text}
+                </p>
+              ))}
+            </div>
+            <form onSubmit={submitChat}>
+              <input
+                ref={chatInputRef}
+                value={draft}
+                maxLength={160}
+                placeholder="Chat"
+                aria-label="Chat"
+                onChange={(e) => setDraft(e.target.value)}
+                onFocus={() => document.exitPointerLock()}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") e.currentTarget.blur();
+                }}
+              />
+            </form>
+          </section>
           {!hud.locked && !hud.menu && !hud.score && !hud.map && !hud.console ? (
             <button className="btn primary look" type="button" onClick={() => gameRef.current?.lock()}>
               Click to look
@@ -562,6 +626,8 @@ function Home() {
                     <span>Scoreboard, map, console. Esc options.</span>
                     <span>V</span>
                     <span>Spectator camera. WASD flies, Space up, Ctrl down, Shift boosts. World voices and shots fade as you fly away. V returns you to your pilot.</span>
+                    <span>Enter</span>
+                    <span>Chat. Escape leaves the box. The line goes to every pilot in the match.</span>
                     <span>Voices</span>
                     <span>You hear your pilot, the announcer, and a commentator. Other pilots and guns only if they are close, so a full field does not turn into noise.</span>
                     <span>Server</span>
@@ -575,7 +641,7 @@ function Home() {
                   <img className="cast" src="/game/cast.jpg" alt="The four aces: angel doll, blue-haired ace, goth, and her friend" />
                   <p className="handle">@sugoimeg</p>
                   <p className="muted">
-                    Mount Dew is a nonstop three-team capture match. Citrus holds the white stone and the coconut desert, Voltage the space decks, Code Red the red stone city. The hill in the middle pays a speed surge if a team keeps it for two minutes. Rise rites pull green mutants out of fallen bodies. An announcer calls the flags and a commentator talks over the nearby fight. Fly the spectator camera and the field goes quiet as you leave it. The match PC can host a hundred pilots. Your nickname stays in this browser. Rank and score updates go through the relay so a refreshed page cannot invent them.
+                    Mount Dew is a nonstop three-team capture match. Citrus holds the white stone and the coconut desert, Voltage the space decks, Code Red the red stone city. The hill in the middle pays a speed surge if a team keeps it for two minutes. Rise rites pull green mutants out of fallen bodies. An announcer calls the flags and a commentator talks over the nearby fight. Fly the spectator camera and the field goes quiet as you leave it. The match PC can host a thousand pilots in one room. Your nickname stays in this browser. Rank and score updates go through the relay so a refreshed page cannot invent them.
                   </p>
                 </div>
               ) : null}

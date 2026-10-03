@@ -19,6 +19,7 @@ import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
+import { availableParallelism } from "node:os";
 import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -135,13 +136,17 @@ function waitForSite() {
   });
 }
 
+const siteAgent = new http.Agent({ keepAlive: true, maxSockets: 1000, maxFreeSockets: 256 });
+
 function proxy(req, res) {
   const headers = { ...req.headers, host: `127.0.0.1:${APP_PORT}` };
-  delete headers.connection;
+  for (const hop of ["connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade"]) delete headers[hop];
   const upstream = http.request(
-    { hostname: "127.0.0.1", port: APP_PORT, path: req.url, method: req.method, headers },
+    { hostname: "127.0.0.1", port: APP_PORT, path: req.url, method: req.method, headers, agent: siteAgent },
     (up) => {
-      res.writeHead(up.statusCode || 502, up.headers);
+      const out = { ...up.headers };
+      for (const hop of ["connection", "keep-alive", "transfer-encoding", "upgrade"]) delete out[hop];
+      res.writeHead(up.statusCode || 502, out);
       up.pipe(res);
     },
   );
@@ -149,6 +154,7 @@ function proxy(req, res) {
     if (!res.headersSent) res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(page("Mount Dew", bootNote));
   });
+  req.on("error", () => upstream.destroy());
   req.pipe(upstream);
 }
 
@@ -221,33 +227,34 @@ function openPort(port, secure) {
   const httpServer = http.createServer(onRequest);
   attachRelay(httpServer);
   httpServer.on("error", () => {});
-  httpServer.on("clientError", (_err, socket) => socket.destroy());
   let httpsServer = null;
   if (secure) {
     httpsServer = https.createServer({ key: readFileSync(keyFile), cert: readFileSync(certFile) }, onRequest);
     attachRelay(httpsServer);
     httpsServer.on("error", () => {});
-    httpsServer.on("clientError", (_err, socket) => socket.destroy());
   }
-  const tcp = net.createServer((socket) => {
+  const tcp = net.createServer({ pauseOnConnect: true, allowHalfOpen: false }, (socket) => {
     socket.on("error", () => {});
-    socket.once("data", (chunk) => {
-      socket.pause();
-      socket.unshift(chunk);
-      const tlsHello = chunk.length > 0 && chunk[0] === 22;
-      if (tlsHello && httpsServer) httpsServer.emit("connection", socket);
-      else httpServer.emit("connection", socket);
-      process.nextTick(() => socket.resume());
-    });
+    socket.setNoDelay(true);
+    const chunk = socket.read();
+    const take = (buf) => {
+      const tlsHello = buf && buf.length > 0 && buf[0] === 22;
+      const target = tlsHello && httpsServer ? httpsServer : httpServer;
+      target.emit("connection", socket);
+      if (buf && buf.length) socket.unshift(buf);
+      socket.resume();
+    };
+    if (chunk) take(chunk);
+    else socket.once("readable", () => take(socket.read() || Buffer.alloc(0)));
   });
   tcp.on("error", (err) => {
     console.warn("Warning: port " + port + " is " + reason(err) + ". Skipping it. The match stays on any port that did open.");
     tcp.__failed = true;
   });
-  tcp.listen(port, HOST, () => {
+  tcp.listen({ port, host: HOST, backlog: 4096 }, () => {
     tcp.__open = true;
     const mode = httpsServer ? "HTTP and HTTPS" : "HTTP only";
-    console.log("Listening on    " + HOST + ":" + port + "  (" + mode + ", one match)");
+    console.log("Listening on    " + HOST + ":" + port + "  (" + mode + ", 1000 pilots, one room)");
   });
   return tcp;
 }
@@ -264,6 +271,7 @@ setTimeout(() => {
     process.exit(1);
   }
   console.log("Same room on   " + opened.map((port) => "http(s)://" + DOMAIN + (port === 80 ? "" : ":" + port)).join("  "));
+  console.log("One room for 1000 pilots. CPUs: " + availableParallelism() + ". A player already inside does not block the next.");
   console.log("The website comes up after this line. Leave the window open.");
   void bootSite();
 }, 400);
