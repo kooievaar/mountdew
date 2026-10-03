@@ -12,8 +12,13 @@ const REMEMBER = "mountdew.gate.v1";
 const REG = "mountdew.reg.v1";
 const GFX = "mountdew.gfx";
 const RELAY = "mountdew.relay";
-const PUBLIC_MATCH = "wss://newsfeed.qzz.io:8888";
-const PUBLIC_SITE = "https://newsfeed.qzz.io:8888";
+const PUBLIC_SITE = "https://mountdew.oops.wtf";
+const SERVERS = [
+  "wss://mountdew.oops.wtf:8888",
+  "wss://mountdew.groups.id:8888",
+  "wss://mountdew.tantrum.org:8888",
+] as const;
+const SERVER_LABEL = ["Primary", "Fallback", "Third"];
 
 const ASCII = ` __  __  ___  _   _ _   _ _____
 |  \\/  |/ _ \\| | | | \\ | |_   _|
@@ -28,8 +33,8 @@ function Home() {
   const gameRef = useRef<GameHandle | null>(null);
   const [nick, setNick] = useState("");
   const [password, setPassword] = useState("");
-  const [relay, setRelay] = useState(PUBLIC_MATCH);
-  const [pilots, setPilots] = useState<number | null>(null);
+  const [relay, setRelay] = useState<string>(SERVERS[0]);
+  const [serverLive, setServerLive] = useState<Record<string, number | null>>({});
   const [team, setTeam] = useState(0);
   const [charId, setCharId] = useState("angel");
   const [error, setError] = useState("");
@@ -51,18 +56,23 @@ function Home() {
         if (saved.charId) setCharId(saved.charId);
       }
       const savedRelay = localStorage.getItem(RELAY);
-      if (savedRelay) setRelay(savedRelay);
-      else if (window.location.hostname === "newsfeed.qzz.io") setRelay(`wss://${window.location.host}`);
+      if (savedRelay && (SERVERS as readonly string[]).includes(savedRelay)) setRelay(savedRelay);
+      else setRelay(SERVERS[0]);
     } catch {
       /* ignore bad local gate */
     }
-    if (window.location.port === "8888" || window.location.hostname === "newsfeed.qzz.io") {
-      void fetch("/health")
-        .then((res) => (res.ok ? res.json() : null))
-        .then((body: { pilots?: number } | null) => {
-          if (body && typeof body.pilots === "number") setPilots(body.pilots);
-        })
-        .catch(() => {});
+    const host = window.location.hostname;
+    const onPublic = host === "mountdew.oops.wtf" || host === "mountdew.groups.id" || host === "mountdew.tantrum.org" || window.location.port === "8888";
+    if (onPublic) {
+      for (const url of SERVERS) {
+        const health = url.replace(/^wss:/, "https:") + "/health";
+        void fetch(health)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((body: { pilots?: number } | null) => {
+            if (body && typeof body.pilots === "number") setServerLive((prev) => ({ ...prev, [url]: body.pilots as number }));
+          })
+          .catch(() => {});
+      }
     }
     void fetchBoard()
       .then(setBoard)
@@ -96,25 +106,34 @@ function Home() {
     const clean = name.trim();
     const address = relay.trim();
     if (address && !qa) {
-      try {
-        const link = await connectRelay(address);
-        const res = await link.join(clean, pass, teamId, hero);
-        if (!res.ok) {
-          link.close();
-          setError(res.error);
-          setBusy(false);
-          return;
+      const known = (SERVERS as readonly string[]).includes(address);
+      const order = known ? [address, ...SERVERS.filter((url) => url !== address)] : [address];
+      let linked = false;
+      for (const url of order) {
+        try {
+          const link = await connectRelay(url);
+          const res = await link.join(clean, pass, teamId, hero);
+          if (!res.ok) {
+            link.close();
+            setError(res.error);
+            setBusy(false);
+            return;
+          }
+          localStorage.setItem(RELAY, url);
+          localStorage.setItem(REMEMBER, JSON.stringify({ nick: clean, password: pass, team: teamId, charId: hero }));
+          bindRelay(link);
+          setRelay(url);
+          setBoard(res.board);
+          game.deploy({ nick: res.profile.nick, team: teamId, charId: hero, token: res.token, xp: res.profile.xp, qa });
+          game.pushLine(url === SERVERS[0] ? "match server linked" : `linked ${url}`);
+          setPhase("play");
+          linked = true;
+          break;
+        } catch {
+          /* try the next public server */
         }
-        localStorage.setItem(RELAY, address);
-        localStorage.setItem(REMEMBER, JSON.stringify({ nick: clean, password: pass, team: teamId, charId: hero }));
-        bindRelay(link);
-        setBoard(res.board);
-        game.deploy({ nick: res.profile.nick, team: teamId, charId: hero, token: res.token, xp: res.profile.xp, qa });
-        game.pushLine("match server linked");
-        setPhase("play");
-      } catch {
-        setError("Match server didn't answer. Check the address, or leave it blank to play in this browser.");
       }
+      if (!linked) setError("None of the match servers answered. Clear the address to play in this browser.");
       setBusy(false);
       return;
     }
@@ -204,8 +223,18 @@ function Home() {
                 <p className="kicker">{PUBLIC_SITE}</p>
                 <h1>Mount Dew</h1>
                 <p className="lede">One desert. Three flags. A hill that pays if you hold it. The match stays up, and you can drop in from this page.</p>
-                <img className="cast" src="/game/cast.jpg" alt="Seraph Doll, Bluebelle, Noir Nyx, and Bestie Bea in the desert arena" />
+                <img className="cast" src="/game/cast.jpg" alt="Seraph Doll, Bluebelle, Noir Nyx, and Bestie Bea full length in the desert arena" />
                 <p className="handle">@sugoimeg</p>
+                <div className="servers" aria-label="Match servers">
+                  <p className="kicker">Match servers</p>
+                  {SERVERS.map((url, index) => (
+                    <button key={url} type="button" className={relay === url ? "choice on" : "choice"} onClick={() => setRelay(url)}>
+                      <span>{SERVER_LABEL[index]}</span>
+                      <span className="mono">{url}</span>
+                      <span>{serverLive[url] == null ? "quiet" : `${serverLive[url]} pilots`}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
               <section id="drop" className="panel">
                 <p className="kicker">Start the match</p>
@@ -247,9 +276,9 @@ function Home() {
                   />
                 </label>
                 <p className="muted">
-                  {pilots === null
-                    ? "The live match is already filled in. Clear the address to play alone in this browser."
-                    : `${pilots} of 100 pilots linked on the public match.`}
+                  {serverLive[SERVERS[0]] == null
+                    ? "Primary is wss://mountdew.oops.wtf:8888. If it is quiet, drop-in tries the fallback, then the third server. Clear the address to play alone in this browser."
+                    : `${serverLive[SERVERS[0]]} of 100 pilots on the primary match.`}
                 </p>
                 {error ? <p className="err">{error}</p> : null}
                 <button
@@ -331,7 +360,7 @@ function Home() {
             <section className="panel">
               <h2>Match PC</h2>
               <p className="muted">
-                The public address is {PUBLIC_SITE}. On the machine that answers for newsfeed.qzz.io, start the site and the relay together with node host/server.mjs. It listens on port 8888. A certificate in host/certs keeps the lock trusted. Until then, the browser may ask you to continue once.
+                The website is https://mountdew.oops.wtf. The match room is the same on wss://mountdew.oops.wtf:8888, then wss://mountdew.groups.id:8888, then wss://mountdew.tantrum.org:8888. Drop-in tries them in that order. Start a match PC with node host/server.mjs.
               </p>
               <p className="credit">MADE BY DAN</p>
             </section>
@@ -536,7 +565,7 @@ function Home() {
                     <span>Voices</span>
                     <span>You hear your pilot, the announcer, and a commentator. Other pilots and guns only if they are close, so a full field does not turn into noise.</span>
                     <span>Server</span>
-                    <span>The live match is wss://newsfeed.qzz.io:8888. Clear Match server to play only in this browser. The match PC starts with node host/server.mjs.</span>
+                    <span>The website is https://mountdew.oops.wtf. The match tries wss://mountdew.oops.wtf:8888, then wss://mountdew.groups.id:8888, then wss://mountdew.tantrum.org:8888. Clear Match server to play only in this browser.</span>
                   </div>
                   <p className="credit">MADE BY DAN</p>
                 </div>

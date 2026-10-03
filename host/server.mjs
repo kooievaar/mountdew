@@ -1,30 +1,35 @@
 /**
  * Mount Dew public match.
- * Serves the site and the 100-pilot relay on one HTTPS port.
+ * One process, one game room, on every address below.
  *
  *   npm install
  *   node host/server.mjs
  *
- * Public address: https://newsfeed.qzz.io:8888
- * Match socket:   wss://newsfeed.qzz.io:8888
+ *   http://mountdew.oops.wtf
+ *   https://mountdew.oops.wtf
+ *   http://mountdew.oops.wtf:8888
+ *   https://mountdew.oops.wtf:8888
  *
- * The port opens immediately. The website compiles after that.
+ * Ports 80 and 443 are the plain names. Port 8888 is the same room.
+ * Each port accepts HTTP and HTTPS. If 80 or 443 is blocked, a warning
+ * is printed and 8888 still starts.
  * Drop a real certificate at host/certs/cert.pem and host/certs/key.pem.
- * If those files are missing, a certificate for newsfeed.qzz.io is created.
  */
 import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
 import https from "node:https";
+import net from "node:net";
 import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { attachRelay, relayHealth } from "../relay/server.mjs";
 import { mergeAppEnv, readAppEnv } from "../scripts/with-app-env.mjs";
 
-const PORT = Number(process.env.PORT || 8888);
+const DOMAIN = "mountdew.oops.wtf";
+const PORTS = [80, 443, 8888];
 const HOST = process.env.HOST || "0.0.0.0";
 const APP_PORT = Number(process.env.APP_PORT || 8092);
-const PUBLIC_SITE = "https://newsfeed.qzz.io:8888";
+const PUBLIC_SITE = `https://${DOMAIN}`;
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const certDir = join(root, "host", "certs");
 const certFile = process.env.CERT_FILE || join(certDir, "cert.pem");
@@ -42,27 +47,6 @@ main{max-width:36rem;padding:2rem}
 h1{font-weight:500;letter-spacing:.04em}
 code{font-family:ui-monospace,monospace;color:#d6ff4a}
 </style></head><body><main><h1>${title}</h1><p>${body}</p></main></body></html>`;
-}
-
-function ensureCert() {
-  if (existsSync(certFile) && existsSync(keyFile)) return;
-  mkdirSync(certDir, { recursive: true });
-  const made = spawnSync(
-    "openssl",
-    [
-      "req", "-x509", "-newkey", "rsa:2048",
-      "-keyout", keyFile, "-out", certFile,
-      "-days", "825", "-nodes",
-      "-subj", "/CN=newsfeed.qzz.io",
-      "-addext", "subjectAltName=DNS:newsfeed.qzz.io,DNS:localhost,IP:127.0.0.1",
-    ],
-    { stdio: "inherit" },
-  );
-  if (made.status !== 0) {
-    console.error("Could not write a certificate. Put cert.pem and key.pem in host/certs.");
-    process.exit(1);
-  }
-  console.log("Wrote a certificate for newsfeed.qzz.io. Replace host/certs with a public certificate when you have one.");
 }
 
 function hasDeps() {
@@ -182,7 +166,7 @@ async function bootSite() {
     await waitForSite();
     siteUp = true;
     console.log("Website is ready.");
-    console.log("Open " + PUBLIC_SITE + "  (accept the certificate warning once)");
+    console.log("Same room: " + PUBLIC_SITE + "  https://" + DOMAIN + "  and both on port 8888");
   } catch (err) {
     bootNote = err instanceof Error ? err.message : "The website did not start.";
     console.error(bootNote);
@@ -190,37 +174,96 @@ async function bootSite() {
   }
 }
 
-ensureCert();
-
-const server = https.createServer(
-  { key: readFileSync(keyFile), cert: readFileSync(certFile) },
-  (req, res) => {
-    const path = (req.url || "/").split("?")[0];
-    if (path === "/health") {
-      res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
-      res.end(JSON.stringify({ ...relayHealth(), site: siteUp }));
-      return;
-    }
-    if (!siteUp) {
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      res.end(page("Mount Dew", bootNote));
-      return;
-    }
-    proxy(req, res);
-  },
-);
-attachRelay(server);
-server.on("error", (err) => {
-  if (err && err.code === "EADDRINUSE") {
-    console.error("Port " + PORT + " is already in use. Close the other Mount Dew window, or run: $env:PORT=8889; node host/server.mjs");
-  } else {
-    console.error(err);
+function onRequest(req, res) {
+  const path = (req.url || "/").split("?")[0];
+  if (path === "/health") {
+    res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
+    res.end(JSON.stringify({ ...relayHealth(), site: siteUp }));
+    return;
   }
-  process.exit(1);
-});
-server.listen(PORT, HOST, () => {
-  console.log("Mount Dew site  " + PUBLIC_SITE);
-  console.log("Listening on    " + HOST + ":" + PORT + "  (100 pilots)");
+  if (!siteUp) {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(page("Mount Dew", bootNote));
+    return;
+  }
+  proxy(req, res);
+}
+
+function ensureCert() {
+  if (existsSync(certFile) && existsSync(keyFile)) return true;
+  mkdirSync(certDir, { recursive: true });
+  const made = spawnSync(
+    "openssl",
+    [
+      "req", "-x509", "-newkey", "rsa:2048",
+      "-keyout", keyFile, "-out", certFile,
+      "-days", "825", "-nodes",
+      "-subj", "/CN=" + DOMAIN,
+      "-addext", "subjectAltName=DNS:" + DOMAIN + ",DNS:localhost,IP:127.0.0.1",
+    ],
+    { stdio: "inherit" },
+  );
+  if (made.status !== 0) {
+    console.warn("Warning: no certificate, so HTTPS is off. HTTP still starts. Put cert.pem and key.pem in host/certs.");
+    return false;
+  }
+  console.log("Wrote a certificate for " + DOMAIN + ". Replace host/certs when you have a public one.");
+  return true;
+}
+
+function reason(err) {
+  if (err && err.code === "EADDRINUSE") return "already in use";
+  if (err && (err.code === "EACCES" || err.code === "EPERM")) return "blocked";
+  return err && err.message ? err.message : "unavailable";
+}
+
+function openPort(port, secure) {
+  const httpServer = http.createServer(onRequest);
+  attachRelay(httpServer);
+  httpServer.on("error", () => {});
+  httpServer.on("clientError", (_err, socket) => socket.destroy());
+  let httpsServer = null;
+  if (secure) {
+    httpsServer = https.createServer({ key: readFileSync(keyFile), cert: readFileSync(certFile) }, onRequest);
+    attachRelay(httpsServer);
+    httpsServer.on("error", () => {});
+    httpsServer.on("clientError", (_err, socket) => socket.destroy());
+  }
+  const tcp = net.createServer((socket) => {
+    socket.on("error", () => {});
+    socket.once("data", (chunk) => {
+      socket.pause();
+      socket.unshift(chunk);
+      const tlsHello = chunk.length > 0 && chunk[0] === 22;
+      if (tlsHello && httpsServer) httpsServer.emit("connection", socket);
+      else httpServer.emit("connection", socket);
+      process.nextTick(() => socket.resume());
+    });
+  });
+  tcp.on("error", (err) => {
+    console.warn("Warning: port " + port + " is " + reason(err) + ". Skipping it. The match stays on any port that did open.");
+    tcp.__failed = true;
+  });
+  tcp.listen(port, HOST, () => {
+    tcp.__open = true;
+    const mode = httpsServer ? "HTTP and HTTPS" : "HTTP only";
+    console.log("Listening on    " + HOST + ":" + port + "  (" + mode + ", one match)");
+  });
+  return tcp;
+}
+
+const secure = ensureCert();
+const listeners = PORTS.map((port) => openPort(port, secure));
+setTimeout(() => {
+  const opened = listeners.filter((tcp) => tcp.__open).map((tcp) => tcp.address().port);
+  if (!opened.includes(8888)) {
+    console.warn("Warning: port 8888 did not open.");
+  }
+  if (opened.length === 0) {
+    console.error("No match port opened. Free port 8888 and start again.");
+    process.exit(1);
+  }
+  console.log("Same room on   " + opened.map((port) => "http(s)://" + DOMAIN + (port === 80 ? "" : ":" + port)).join("  "));
   console.log("The website comes up after this line. Leave the window open.");
   void bootSite();
-});
+}, 400);

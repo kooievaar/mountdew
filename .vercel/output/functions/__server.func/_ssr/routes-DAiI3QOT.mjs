@@ -2,7 +2,7 @@ import { i as __toESM } from "../_runtime.mjs";
 import { b as require_jsx_runtime, q as require_react } from "../_libs/@tanstack/react-router+[...].mjs";
 import { n as TSS_SERVER_FUNCTION, r as getServerFnById, t as createServerFn } from "./ssr.mjs";
 import { a as Maximize2, c as Eye, i as Settings, o as Map$1, r as Terminal, s as List, t as X } from "../_libs/lucide-react.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/routes-DU4PRwRX.js
+//#region node_modules/.nitro/vite/services/ssr/assets/routes-DAiI3QOT.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var __defProp = Object.defineProperty;
@@ -848,8 +848,17 @@ var REMEMBER = "mountdew.gate.v1";
 var REG = "mountdew.reg.v1";
 var GFX = "mountdew.gfx";
 var RELAY = "mountdew.relay";
-var PUBLIC_MATCH = "wss://newsfeed.qzz.io:8888";
-var PUBLIC_SITE = "https://newsfeed.qzz.io:8888";
+var PUBLIC_SITE = "https://mountdew.oops.wtf";
+var SERVERS = [
+	"wss://mountdew.oops.wtf:8888",
+	"wss://mountdew.groups.id:8888",
+	"wss://mountdew.tantrum.org:8888"
+];
+var SERVER_LABEL = [
+	"Primary",
+	"Fallback",
+	"Third"
+];
 var ASCII = ` __  __  ___  _   _ _   _ _____
 |  \\/  |/ _ \\| | | | \\ | |_   _|
 | |\\/| | | | | | | |  \\| | | |
@@ -862,8 +871,8 @@ function Home() {
 	const gameRef = (0, import_react.useRef)(null);
 	const [nick, setNick] = (0, import_react.useState)("");
 	const [password, setPassword] = (0, import_react.useState)("");
-	const [relay, setRelay] = (0, import_react.useState)(PUBLIC_MATCH);
-	const [pilots, setPilots] = (0, import_react.useState)(null);
+	const [relay, setRelay] = (0, import_react.useState)(SERVERS[0]);
+	const [serverLive, setServerLive] = (0, import_react.useState)({});
 	const [team, setTeam] = (0, import_react.useState)(0);
 	const [charId, setCharId] = (0, import_react.useState)("angel");
 	const [error, setError] = (0, import_react.useState)("");
@@ -892,17 +901,24 @@ function Home() {
 				if (saved.charId) setCharId(saved.charId);
 			}
 			const savedRelay = localStorage.getItem(RELAY);
-			if (savedRelay) setRelay(savedRelay);
-			else if (window.location.hostname === "newsfeed.qzz.io") setRelay(`wss://${window.location.host}`);
+			if (savedRelay && SERVERS.includes(savedRelay)) setRelay(savedRelay);
+			else setRelay(SERVERS[0]);
 		} catch {}
-		if (window.location.port === "8888" || window.location.hostname === "newsfeed.qzz.io") fetch("/health").then((res) => res.ok ? res.json() : null).then((body) => {
-			if (body && typeof body.pilots === "number") setPilots(body.pilots);
-		}).catch(() => {});
+		const host = window.location.hostname;
+		if (host === "mountdew.oops.wtf" || host === "mountdew.groups.id" || host === "mountdew.tantrum.org" || window.location.port === "8888") for (const url of SERVERS) {
+			const health = url.replace(/^wss:/, "https:") + "/health";
+			fetch(health).then((res) => res.ok ? res.json() : null).then((body) => {
+				if (body && typeof body.pilots === "number") setServerLive((prev) => ({
+					...prev,
+					[url]: body.pilots
+				}));
+			}).catch(() => {});
+		}
 		fetchBoard().then(setBoard).catch(() => setError("Relay quiet. You can still drop in locally."));
 		let dead = false;
 		let stop = () => {};
 		(async () => {
-			const mod = await import("./engine-D-qJWicd.mjs");
+			const mod = await import("./engine-s_zIlh0R.mjs");
 			if (dead || !viewRef.current || !overlayRef.current) return;
 			const qa = new URLSearchParams(window.location.search).has("qa");
 			const game = mod.createGame(viewRef.current, overlayRef.current, { qa });
@@ -927,8 +943,10 @@ function Home() {
 		const clean = name.trim();
 		const address = relay.trim();
 		if (address && !qa) {
-			try {
-				const link = await connectRelay(address);
+			const order = SERVERS.includes(address) ? [address, ...SERVERS.filter((url) => url !== address)] : [address];
+			let linked = false;
+			for (const url of order) try {
+				const link = await connectRelay(url);
 				const res = await link.join(clean, pass, teamId, hero);
 				if (!res.ok) {
 					link.close();
@@ -936,7 +954,7 @@ function Home() {
 					setBusy(false);
 					return;
 				}
-				localStorage.setItem(RELAY, address);
+				localStorage.setItem(RELAY, url);
 				localStorage.setItem(REMEMBER, JSON.stringify({
 					nick: clean,
 					password: pass,
@@ -944,6 +962,7 @@ function Home() {
 					charId: hero
 				}));
 				bindRelay(link);
+				setRelay(url);
 				setBoard(res.board);
 				game.deploy({
 					nick: res.profile.nick,
@@ -953,11 +972,12 @@ function Home() {
 					xp: res.profile.xp,
 					qa
 				});
-				game.pushLine("match server linked");
+				game.pushLine(url === SERVERS[0] ? "match server linked" : `linked ${url}`);
 				setPhase("play");
-			} catch {
-				setError("Match server didn't answer. Check the address, or leave it blank to play in this browser.");
-			}
+				linked = true;
+				break;
+			} catch {}
+			if (!linked) setError("None of the match servers answered. Clear the address to play in this browser.");
 			setBusy(false);
 			return;
 		}
@@ -1122,11 +1142,31 @@ function Home() {
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
 										className: "cast",
 										src: "/game/cast.jpg",
-										alt: "Seraph Doll, Bluebelle, Noir Nyx, and Bestie Bea in the desert arena"
+										alt: "Seraph Doll, Bluebelle, Noir Nyx, and Bestie Bea full length in the desert arena"
 									}),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 										className: "handle",
 										children: "@sugoimeg"
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+										className: "servers",
+										"aria-label": "Match servers",
+										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+											className: "kicker",
+											children: "Match servers"
+										}), SERVERS.map((url, index) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+											type: "button",
+											className: relay === url ? "choice on" : "choice",
+											onClick: () => setRelay(url),
+											children: [
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: SERVER_LABEL[index] }),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+													className: "mono",
+													children: url
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: serverLive[url] == null ? "quiet" : `${serverLive[url]} pilots` })
+											]
+										}, url))]
 									})
 								]
 							}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
@@ -1203,7 +1243,7 @@ function Home() {
 									}),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 										className: "muted",
-										children: pilots === null ? "The live match is already filled in. Clear the address to play alone in this browser." : `${pilots} of 100 pilots linked on the public match.`
+										children: serverLive[SERVERS[0]] == null ? "Primary is wss://mountdew.oops.wtf:8888. If it is quiet, drop-in tries the fallback, then the third server. Clear the address to play alone in this browser." : `${serverLive[SERVERS[0]]} of 100 pilots on the primary match.`
 									}),
 									error ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 										className: "err",
@@ -1321,13 +1361,9 @@ function Home() {
 							className: "panel",
 							children: [
 								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", { children: "Match PC" }),
-								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 									className: "muted",
-									children: [
-										"The public address is ",
-										PUBLIC_SITE,
-										". On the machine that answers for newsfeed.qzz.io, start the site and the relay together with node host/server.mjs. It listens on port 8888. A certificate in host/certs keeps the lock trusted. Until then, the browser may ask you to continue once."
-									]
+									children: "The website is https://mountdew.oops.wtf. The match room is the same on wss://mountdew.oops.wtf:8888, then wss://mountdew.groups.id:8888, then wss://mountdew.tantrum.org:8888. Drop-in tries them in that order. Start a match PC with node host/server.mjs."
 								}),
 								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 									className: "credit",
@@ -1643,7 +1679,7 @@ function Home() {
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Voices" }),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "You hear your pilot, the announcer, and a commentator. Other pilots and guns only if they are close, so a full field does not turn into noise." }),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Server" }),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "The live match is wss://newsfeed.qzz.io:8888. Clear Match server to play only in this browser. The match PC starts with node host/server.mjs." })
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "The website is https://mountdew.oops.wtf. The match tries wss://mountdew.oops.wtf:8888, then wss://mountdew.groups.id:8888, then wss://mountdew.tantrum.org:8888. Clear Match server to play only in this browser." })
 								]
 							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 								className: "credit",

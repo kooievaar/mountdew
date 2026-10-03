@@ -243,7 +243,7 @@ function takeFrame(buf) {
 const sockets = new Set();
 
 export function relayHealth() {
-  return { ok: true, pilots: humans.size, cap: MAX_PILOTS, site: "https://newsfeed.qzz.io:8888" };
+  return { ok: true, pilots: humans.size, cap: MAX_PILOTS, site: "http://mountdew.oops.wtf" };
 }
 
 export function attachRelay(server) {
@@ -295,7 +295,7 @@ if (isMain) {
       return;
     }
     res.writeHead(200, { "content-type": "text/plain" });
-    res.end("Mount Dew relay. The site and the match share https://newsfeed.qzz.io:8888 via node host/server.mjs");
+    res.end("Mount Dew relay. The site and the match share http://mountdew.oops.wtf via node host/server.mjs");
   });
   attachRelay(server);
   server.listen(PORT, HOST, () => {
