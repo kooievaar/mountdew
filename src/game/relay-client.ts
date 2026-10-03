@@ -25,10 +25,12 @@ type RelayLink = {
   pulse: (body: PulseIn) => Promise<PulseResult>;
   close: () => void;
   chat: (text: string) => void;
+  announce: (text: string) => void;
 };
 
 let bound: RelayLink | null = null;
 const chatFns = new Set<(line: ChatLine) => void>();
+const announceFns = new Set<(text: string) => void>();
 
 export function bindRelay(next: RelayLink | null) {
   bound?.close();
@@ -41,6 +43,17 @@ export function relayBound() {
 
 export function sendRelayChat(text: string) {
   bound?.chat(text);
+}
+
+export function sendRelayAnnounce(text: string) {
+  bound?.announce(text);
+}
+
+export function onRelayAnnounce(fn: (text: string) => void) {
+  announceFns.add(fn);
+  return () => {
+    announceFns.delete(fn);
+  };
 }
 
 export function onRelayChat(fn: (line: ChatLine) => void) {
@@ -117,6 +130,11 @@ export function connectRelay(url: string): Promise<RelayHandle & RelayLink> {
           if (!token || !clean) return;
           sock.send(JSON.stringify({ op: "chat", id: seq++, token, text: clean }));
         },
+        announce(text: string) {
+          const clean = text.replace(/\s+/g, " ").trim().slice(0, 180);
+          if (!token || !clean) return;
+          sock.send(JSON.stringify({ op: "announce", id: seq++, token, text: clean }));
+        },
         close() {
           sock.close();
         },
@@ -130,6 +148,11 @@ export function connectRelay(url: string): Promise<RelayHandle & RelayLink> {
       try {
         msg = JSON.parse(String(ev.data)) as Record<string, unknown>;
       } catch {
+        return;
+      }
+      if (msg.op === "announce" && typeof msg.text === "string") {
+        const text = msg.text.slice(0, 180);
+        for (const fn of announceFns) fn(text);
         return;
       }
       if (msg.op === "chat" && typeof msg.nick === "string" && typeof msg.text === "string") {

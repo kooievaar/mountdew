@@ -2,7 +2,7 @@ import { i as __toESM } from "../_runtime.mjs";
 import { b as require_jsx_runtime, q as require_react } from "../_libs/@tanstack/react-router+[...].mjs";
 import { n as TSS_SERVER_FUNCTION, r as getServerFnById, t as createServerFn } from "./ssr.mjs";
 import { a as Maximize2, c as Eye, i as Settings, o as Map$1, r as Terminal, s as List, t as X } from "../_libs/lucide-react.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/routes-Dy37HWDw.js
+//#region node_modules/.nitro/vite/services/ssr/assets/routes-ELR1h6HI.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var __defProp = Object.defineProperty;
@@ -37,6 +37,7 @@ var joinMount = createServerFn({ method: "POST" }).validator((input) => ({
 var pulseMount = createServerFn({ method: "POST" }).validator((input) => input).handler(createSsrRpc("1287837d9f5e5647a3b5b13e52250686e368193d74072347df5a97c9c571f25c"));
 var bound = null;
 var chatFns = /* @__PURE__ */ new Set();
+var announceFns = /* @__PURE__ */ new Set();
 function bindRelay(next) {
 	bound?.close();
 	bound = next;
@@ -46,6 +47,15 @@ function relayBound() {
 }
 function sendRelayChat(text) {
 	bound?.chat(text);
+}
+function sendRelayAnnounce(text) {
+	bound?.announce(text);
+}
+function onRelayAnnounce(fn) {
+	announceFns.add(fn);
+	return () => {
+		announceFns.delete(fn);
+	};
 }
 function onRelayChat(fn) {
 	chatFns.add(fn);
@@ -135,6 +145,16 @@ function connectRelay(url) {
 						text: clean
 					}));
 				},
+				announce(text) {
+					const clean = text.replace(/\s+/g, " ").trim().slice(0, 180);
+					if (!token || !clean) return;
+					sock.send(JSON.stringify({
+						op: "announce",
+						id: seq++,
+						token,
+						text: clean
+					}));
+				},
 				close() {
 					sock.close();
 				}
@@ -147,6 +167,11 @@ function connectRelay(url) {
 			try {
 				msg = JSON.parse(String(ev.data));
 			} catch {
+				return;
+			}
+			if (msg.op === "announce" && typeof msg.text === "string") {
+				const text = msg.text.slice(0, 180);
+				for (const fn of announceFns) fn(text);
 				return;
 			}
 			if (msg.op === "chat" && typeof msg.nick === "string" && typeof msg.text === "string") {
@@ -957,7 +982,7 @@ function Home() {
 		let dead = false;
 		let stop = () => {};
 		(async () => {
-			const mod = await import("./engine-DqBok1TO.mjs");
+			const mod = await import("./engine-BC8zf6Fg.mjs");
 			if (dead || !viewRef.current || !overlayRef.current) return;
 			const qa = new URLSearchParams(window.location.search).has("qa");
 			const game = mod.createGame(viewRef.current, overlayRef.current, { qa });
@@ -981,6 +1006,9 @@ function Home() {
 			...line,
 			id: chatSeq.current++
 		}].slice(-40));
+	}), []);
+	(0, import_react.useEffect)(() => onRelayAnnounce((text) => {
+		gameRef.current?.pushAnnounce(text);
 	}), []);
 	(0, import_react.useEffect)(() => {
 		const el = chatLogRef.current;
@@ -1201,6 +1229,11 @@ function Home() {
 								]
 							})]
 						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
+							className: "site-banner",
+							src: "/x-banner.jpg",
+							alt: "Mount Dew banner. Four pilots in the desert."
+						}),
 						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
 							className: "hero",
 							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
@@ -1216,9 +1249,9 @@ function Home() {
 										children: "One desert. Three flags. A hill that pays if you hold it. The match stays up, and you can drop in from this page."
 									}),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
-										className: "cast",
-										src: "/game/cast.jpg",
-										alt: "Seraph Doll, Bluebelle, Noir Nyx, and Bestie Bea full length in the desert arena"
+										className: "cover",
+										src: "/og.jpg",
+										alt: "Mount Dew app cover"
 									}),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 										className: "handle",
@@ -1457,7 +1490,7 @@ function Home() {
 				})
 			}) : null,
 			play ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-				className: "hud",
+				className: hud.map ? "hud map-open" : "hud",
 				children: [
 					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 						className: "topbar",
@@ -1505,11 +1538,7 @@ function Home() {
 						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 							className: "chip hp",
 							children: [
-								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-									hud.hp,
-									" hp · ",
-									hud.weapon
-								] }),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [hud.hp, " hp"] }),
 								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 									className: "bar",
 									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
@@ -1675,6 +1704,11 @@ function Home() {
 					hud.menu ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
 						className: "sheet",
 						children: [
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
+								className: "menu-banner",
+								src: "/x-banner.jpg",
+								alt: "Mount Dew"
+							}),
 							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 								className: "topbar",
 								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", { children: "Options" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
@@ -1782,7 +1816,7 @@ function Home() {
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Rise" }),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Pinpop, Wrapley, and Bonecaller turn a nearby body into a green mutant. Mutants shamble and claw. They can still carry a flag. Sixteen per team." }),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "1–4" }),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Weapons. Right mouse scopes the glass rifle." }),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Weapons. The wheel shows the gun you hold large, and the others smaller beside it. Scroll switches. Right mouse scopes the glass rifle." }),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Tab / M / `" }),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Scoreboard, map, console. Esc options." }),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "V" }),
@@ -1800,9 +1834,9 @@ function Home() {
 							})] }) : null,
 							tab === "about" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
 								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
-									className: "cast",
-									src: "/game/cast.jpg",
-									alt: "The four aces: angel doll, blue-haired ace, goth, and her friend"
+									className: "cover",
+									src: "/og.jpg",
+									alt: "Mount Dew app cover"
 								}),
 								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 									className: "handle",
@@ -1919,4 +1953,4 @@ function readReg() {
 	}
 }
 //#endregion
-export { CHAR_BY_ID as a, WEAPON_BY_ID as c, netPulse as d, CHARACTERS as i, rankForLevel as l, BOT_NAMES as n, LINES as o, BUILD_ACTIONS as r, TEAMS as s, routes_exports as t, xpToLevel as u };
+export { CHAR_BY_ID as a, WEAPON_BY_ID as c, netPulse as d, sendRelayAnnounce as f, CHARACTERS as i, rankForLevel as l, BOT_NAMES as n, LINES as o, BUILD_ACTIONS as r, TEAMS as s, routes_exports as t, xpToLevel as u };

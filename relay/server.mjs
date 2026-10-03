@@ -223,6 +223,29 @@ function sayChat(msg) {
   return { ok: true };
 }
 
+function sayAnnounce(msg, from) {
+  const key = sessions.get(String(msg.token || ""));
+  if (!key) return { ok: false, error: "Session faded. Drop in again." };
+  const acc = accounts.get(key);
+  if (!acc) return { ok: false, error: "Unknown pilot." };
+  const text = String(msg.text || "")
+    .replace(/[\u0000-\u001f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 180);
+  if (!text) return { ok: false, error: "Empty." };
+  const line = JSON.stringify({ op: "announce", nick: acc.nick, team: acc.team, text, at: Date.now() });
+  for (const sock of sockets) {
+    if (sock === from || sock.destroyed || sock.writableEnded) continue;
+    try {
+      sendText(sock, line);
+    } catch {
+      sockets.delete(sock);
+    }
+  }
+  return { ok: true };
+}
+
 function onJson(socket, text) {
   let msg;
   try {
@@ -236,6 +259,7 @@ function onJson(socket, text) {
     if (msg.op === "join") body = joinPilot(msg);
     else if (msg.op === "pulse") body = pulse(msg);
     else if (msg.op === "chat") body = sayChat(msg);
+    else if (msg.op === "announce") body = sayAnnounce(msg, socket);
     else body = { ok: false, error: "Unknown op." };
   } catch (err) {
     console.error("pilot message failed", err);

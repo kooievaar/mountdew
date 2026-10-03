@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type FormEvent, type PointerEvent } from "
 import { Eye, List, Map, Maximize2, Settings, Terminal, X } from "lucide-react";
 import { CHARACTERS, TEAMS } from "@/game/content";
 import type { GameHandle, HudState, Quality } from "@/game/engine";
-import { bindRelay, connectRelay, onRelayChat, relayBound, sendRelayChat } from "@/game/relay-client";
+import { bindRelay, connectRelay, onRelayAnnounce, onRelayChat, relayBound, sendRelayChat } from "@/game/relay-client";
 import { fetchBoard, joinMount, type BoardRow } from "@/lib/mount-api";
 
 export const Route = createFileRoute("/")({ component: Home });
@@ -107,6 +107,10 @@ function Home() {
 
   useEffect(() => onRelayChat((line) => {
     setChat((prev) => [...prev, { ...line, id: chatSeq.current++ }].slice(-40));
+  }), []);
+
+  useEffect(() => onRelayAnnounce((text) => {
+    gameRef.current?.pushAnnounce(text);
   }), []);
 
   useEffect(() => {
@@ -256,12 +260,13 @@ function Home() {
                 </button>
               </nav>
             </header>
+            <img className="site-banner" src="/x-banner.jpg" alt="Mount Dew banner. Four pilots in the desert." />
             <section className="hero">
               <div className="hero-copy">
                 <p className="kicker">{PUBLIC_SITE}</p>
                 <h1>Mount Dew</h1>
                 <p className="lede">One desert. Three flags. A hill that pays if you hold it. The match stays up, and you can drop in from this page.</p>
-                <img className="cast" src="/game/cast.jpg" alt="Seraph Doll, Bluebelle, Noir Nyx, and Bestie Bea full length in the desert arena" />
+                <img className="cover" src="/og.jpg" alt="Mount Dew app cover" />
                 <p className="handle">@sugoimeg</p>
                 <div className="servers" aria-label="Match servers">
                   <p className="kicker">Match servers</p>
@@ -409,7 +414,7 @@ function Home() {
         </div>
       ) : null}
       {play ? (
-        <div className="hud">
+        <div className={hud.map ? "hud map-open" : "hud"}>
           <div className="topbar">
             <div className="chip scores">
               {hud.teams.map((t) => (
@@ -437,7 +442,7 @@ function Home() {
           <div className="bottombar" style={{ position: "absolute", left: 16, right: 16, bottom: 16 }}>
             <div className="chip hp">
               <div>
-                {hud.hp} hp · {hud.weapon}
+                {hud.hp} hp
               </div>
               <div className="bar">
                 <span className={hud.hp > 60 ? "fill good" : hud.hp > 30 ? "fill mid" : "fill low"} style={{ width: `${hud.hp}%` }} />
@@ -545,6 +550,7 @@ function Home() {
           ) : null}
           {hud.menu ? (
             <section className="sheet">
+              <img className="menu-banner" src="/x-banner.jpg" alt="Mount Dew" />
               <div className="topbar">
                 <h2>Options</h2>
                 <button className="icon-btn" type="button" aria-label="Close options" onClick={() => gameRef.current?.setMenu(false)}>
@@ -621,7 +627,7 @@ function Home() {
                     <span>Rise</span>
                     <span>Pinpop, Wrapley, and Bonecaller turn a nearby body into a green mutant. Mutants shamble and claw. They can still carry a flag. Sixteen per team.</span>
                     <span>1–4</span>
-                    <span>Weapons. Right mouse scopes the glass rifle.</span>
+                    <span>Weapons. The wheel shows the gun you hold large, and the others smaller beside it. Scroll switches. Right mouse scopes the glass rifle.</span>
                     <span>Tab / M / `</span>
                     <span>Scoreboard, map, console. Esc options.</span>
                     <span>V</span>
@@ -638,7 +644,7 @@ function Home() {
               ) : null}
               {tab === "about" ? (
                 <div>
-                  <img className="cast" src="/game/cast.jpg" alt="The four aces: angel doll, blue-haired ace, goth, and her friend" />
+                  <img className="cover" src="/og.jpg" alt="Mount Dew app cover" />
                   <p className="handle">@sugoimeg</p>
                   <p className="muted">
                     Mount Dew is a nonstop three-team capture match. Citrus holds the white stone and the coconut desert, Voltage the space decks, Code Red the red stone city. The hill in the middle pays a speed surge if a team keeps it for two minutes. Rise rites pull green mutants out of fallen bodies. An announcer calls the flags and a commentator talks over the nearby fight. Fly the spectator camera and the field goes quiet as you leave it. The match PC can host a thousand pilots in one room. Your nickname stays in this browser. Rank and score updates go through the relay so a refreshed page cannot invent them.

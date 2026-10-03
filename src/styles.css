@@ -215,6 +215,35 @@
   margin: 0;
 }
 
+.site-banner {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: var(--radius-lg);
+  background: #000;
+}
+
+.cover {
+  width: min(100%, 280px);
+  height: auto;
+  display: block;
+  align-self: center;
+  border-radius: var(--radius-sm);
+  background: #000;
+}
+
+.menu-banner {
+  width: 100%;
+  height: auto;
+  max-height: 168px;
+  object-fit: contain;
+  object-position: center;
+  display: block;
+  border-radius: var(--radius-sm);
+  background: #000;
+  flex: 0 0 auto;
+}
+
 .cast {
   width: 100%;
   height: auto;
@@ -424,6 +453,14 @@
   text-align: center;
 }
 
+.hud.map-open .topbar,
+.hud.map-open .bottombar,
+.hud.map-open .feed,
+.hud.map-open .chat,
+.hud.map-open .touch {
+  visibility: hidden;
+}
+
 .feed p,
 .banner {
   margin: 0;
@@ -433,9 +470,12 @@
 
 .banner {
   font-family: var(--font-display);
-  font-size: 1.6rem;
+  font-size: clamp(1.4rem, 4vw, 2.2rem);
   text-align: center;
   margin-top: 8px;
+  line-height: 1.15;
+  color: #fff6e4;
+  text-shadow: 0 2px 0 #1a140c, 0 0 12px rgba(0, 0, 0, 0.8);
 }
 
 .hp {
@@ -469,7 +509,7 @@
   position: absolute;
   inset: 48px 16px 16px;
   pointer-events: auto;
-  background: color-mix(in oklab, var(--color-surface) 88%, transparent);
+  background: rgba(0, 0, 0, 0.82);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-lg);
   padding: 12px;
@@ -477,6 +517,7 @@
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  overflow: auto;
 }
 
 .board {

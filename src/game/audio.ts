@@ -192,6 +192,17 @@ export function createAudio(): AudioBus {
 
   function announceLine(text: string) {
     const s = text.toLowerCase();
+    if (s.includes("godmode") || s.includes("god mode")) return "god mode";
+    if (s.includes("double penta")) return "double penta kill";
+    if (s.includes("penta")) return "penta kill";
+    if (s.includes("quadruple")) return "quadruple kill";
+    if (s.includes("triple kill")) return "triple kill";
+    if (s.includes("double kill")) return "double kill";
+    if (s.includes("headshot")) return "headshot";
+    if (s.includes("joined")) return "new pilot";
+    if (s.includes("instructor") && s.includes("hill")) return "hold the center hill";
+    if (s.includes("instructor")) return "capture the flag";
+    if (s.includes("dropped") || s.startsWith("kill ")) return "pilot down";
     if (s.includes("captured")) return "flag captured";
     if (s.includes("took")) return "flag taken";
     if (s.includes("returned")) return "flag returned";

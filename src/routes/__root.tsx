@@ -11,6 +11,11 @@ export const Route = createRootRoute({
       { title: "Mount Dew" },
       { name: "theme-color", content: "#12140f" },
       { name: "description", content: "Mount Dew is a three-team capture match in a soda-colored desert." },
+      { property: "og:title", content: "Mount Dew" },
+      { property: "og:description", content: "Three teams. One desert. Capture the flag." },
+      { property: "og:image", content: "/og.jpg" },
+      { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:image", content: "/x-banner.jpg" },
     ],
     links: [
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },

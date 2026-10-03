@@ -1,6 +1,6 @@
-import { a as CHAR_BY_ID, c as WEAPON_BY_ID, d as netPulse, i as CHARACTERS, l as rankForLevel, n as BOT_NAMES, o as LINES, r as BUILD_ACTIONS, s as TEAMS, u as xpToLevel } from "./routes-Dy37HWDw.mjs";
+import { a as CHAR_BY_ID, c as WEAPON_BY_ID, d as netPulse, f as sendRelayAnnounce, i as CHARACTERS, l as rankForLevel, n as BOT_NAMES, o as LINES, r as BUILD_ACTIONS, s as TEAMS, u as xpToLevel } from "./routes-ELR1h6HI.mjs";
 import { A as PerspectiveCamera, B as TorusGeometry, C as MathUtils, D as MeshLambertMaterial, E as MeshBasicMaterial, F as RepeatWrapping, I as SRGBColorSpace, L as Scene, M as Points, N as PointsMaterial, O as MeshPhongMaterial, P as Quaternion, R as SphereGeometry, S as LineSegments, T as Mesh, V as Vector3, _ as Group, a as BufferGeometry, b as InstancedMesh, c as ClampToEdgeWrapping, d as CylinderGeometry, f as DirectionalLight, g as Fog, h as Float32BufferAttribute, i as BufferAttribute, j as PlaneGeometry, k as OctahedronGeometry, l as Color, m as Euler, n as AmbientLight, o as CanvasTexture, p as DodecahedronGeometry, r as BoxGeometry, s as CircleGeometry, t as WebGLRenderer, u as ConeGeometry, v as HemisphereLight, w as Matrix4, x as LineBasicMaterial, y as InstancedBufferAttribute, z as Timer } from "../_libs/three.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/engine-DqBok1TO.js
+//#region node_modules/.nitro/vite/services/ssr/assets/engine-BC8zf6Fg.js
 var HEAR = 28;
 var HEAR_FULL = 7;
 function createAudio() {
@@ -155,6 +155,17 @@ function createAudio() {
 	}
 	function announceLine(text) {
 		const s = text.toLowerCase();
+		if (s.includes("godmode") || s.includes("god mode")) return "god mode";
+		if (s.includes("double penta")) return "double penta kill";
+		if (s.includes("penta")) return "penta kill";
+		if (s.includes("quadruple")) return "quadruple kill";
+		if (s.includes("triple kill")) return "triple kill";
+		if (s.includes("double kill")) return "double kill";
+		if (s.includes("headshot")) return "headshot";
+		if (s.includes("joined")) return "new pilot";
+		if (s.includes("instructor") && s.includes("hill")) return "hold the center hill";
+		if (s.includes("instructor")) return "capture the flag";
+		if (s.includes("dropped") || s.startsWith("kill ")) return "pilot down";
 		if (s.includes("captured")) return "flag captured";
 		if (s.includes("took")) return "flag taken";
 		if (s.includes("returned")) return "flag returned";
@@ -1675,6 +1686,7 @@ function createGame(view, overlay, opts) {
 	const log = [];
 	let banner = "";
 	let bannerAt = 0;
+	const bannerQ = [];
 	const pendingShots = [];
 	const seenShots = /* @__PURE__ */ new Set();
 	let openTele = -1;
@@ -2191,6 +2203,8 @@ function createGame(view, overlay, opts) {
 	viewCam.add(gun);
 	viewScene.add(viewCam);
 	let gunId = "";
+	let gunKick = 0;
+	let wheelShown = 0;
 	const timer = new Timer();
 	timer.connect(document);
 	let acc = 0;
@@ -2203,12 +2217,31 @@ function createGame(view, overlay, opts) {
 			text,
 			at: performance.now()
 		});
-		if (feed.length > 8) feed.shift();
+		if (feed.length > 12) feed.shift();
 		if (big) {
-			banner = text;
-			bannerAt = performance.now();
+			bannerQ.push(text);
 			audio.announce(text);
 		}
+	}
+	function pumpBanner() {
+		const now = performance.now();
+		if (banner && now - bannerAt < 2800) return;
+		const next = bannerQ.shift();
+		banner = next || "";
+		if (next) bannerAt = now;
+	}
+	function globalCall(text) {
+		line(text, true);
+		sendRelayAnnounce(text);
+	}
+	function streakTitle(spree, life) {
+		if (life === 20) return "GODMODE";
+		if (life === 10) return "DOUBLE PENTA-KILL";
+		if (spree >= 5) return "PENTA-KILL";
+		if (spree === 4) return "QUADRUPLE KILL";
+		if (spree === 3) return "TRIPLE KILL";
+		if (spree === 2) return "DOUBLE KILL";
+		return "";
 	}
 	function clockParts() {
 		const elapsed = performance.now() / 1e3 - clock0;
@@ -2525,6 +2558,8 @@ function createGame(view, overlay, opts) {
 			a.downT = 0;
 			a.helpT = .2;
 			a.deaths += 1;
+			a.lifeStreak = 0;
+			a.spree = 0;
 			a.riding = false;
 			a.sheep = 0;
 			a.hover = false;
@@ -2535,11 +2570,27 @@ function createGame(view, overlay, opts) {
 				src.xp += gain;
 				src.pendingXp += gain;
 				src.pendingK += 1;
+				const nowMs = performance.now();
+				if (nowMs - src.spreeAt > 4500) src.spree = 0;
+				src.spree += 1;
+				src.spreeAt = nowMs;
+				src.lifeStreak += 1;
 				if (head && src === player) audio.ding();
+				if (src === player) gunKick = 1;
 			}
 			if (a === player) a.pendingD += 1;
 			const who = src ? src.name : "the field";
-			line(`${head ? "Headshot " : ""}${who} dropped ${a.name}`, head || a === player || src === player);
+			const killLine = `${head ? "HEADSHOT " : "KILL "}${who} dropped ${a.name}`;
+			const shout = !!src && !src.bot || !a.bot;
+			line(killLine, shout);
+			if (shout) sendRelayAnnounce(killLine);
+			if (src) {
+				const title = streakTitle(src.spree, src.lifeStreak);
+				if (title && shout) {
+					line(title, true);
+					sendRelayAnnounce(title);
+				}
+			}
 			say(a, "down");
 			for (let i = 0; i < 8; i++) burst(a.x, a.y + 1, a.z, 16765562, 4);
 		}
@@ -2674,7 +2725,10 @@ function createGame(view, overlay, opts) {
 			revive: 0,
 			voiceCd: 0,
 			abilityCd: 0,
-			flat: 0
+			flat: 0,
+			spree: 0,
+			spreeAt: 0,
+			lifeStreak: 0
 		};
 	}
 	function spawnBots() {
@@ -3208,11 +3262,15 @@ function createGame(view, overlay, opts) {
 				burst(prey.x, prey.y + 1, prey.z, 10354506, 7);
 				say(a, "groan");
 			}
-		} else if (fire && a.cd <= 0 && w.kind !== "flame") shoot(a, w.id);
+		} else if (fire && a.cd <= 0 && w.kind !== "flame") {
+			if (a === player) gunKick = 1;
+			shoot(a, w.id);
+		}
 		if (!a.minion && fire && w.kind === "flame") {
 			a.flame += dt;
 			if (a.cd <= 0) {
 				a.cd = .1;
+				if (a === player) gunKick = 1;
 				flame(a);
 			}
 		}
@@ -4817,13 +4875,192 @@ function createGame(view, overlay, opts) {
 				ctx.fillText(slot.speech, sx, sy - 28);
 			}
 		}
+		if (!spectate) drawWeaponWheel(ctx, w, h);
 		drawMini(ctx, w, h);
+	}
+	function drawWeaponWheel(ctx, w, h) {
+		if (!player) return;
+		const list = loadout(charOf(player));
+		const n = list.length;
+		if (!n) return;
+		const sel = (player.weapon % n + n) % n;
+		let delta = sel - wheelShown;
+		if (delta > n / 2) delta -= n;
+		if (delta < -n / 2) delta += n;
+		wheelShown += delta * .22;
+		if (Math.abs(delta) < .01) wheelShown = sel;
+		gunKick *= .86;
+		const cx = w / 2;
+		const cy = h - 168;
+		const t = performance.now() / 1e3;
+		for (let i = 0; i < n; i++) {
+			let off = i - wheelShown;
+			if (off > n / 2) off -= n;
+			if (off < -n / 2) off += n;
+			if (Math.abs(off) > 2.2) continue;
+			const near = Math.abs(off) < .35;
+			const scale = (near ? 1.2 : .62) - Math.abs(off) * .08;
+			const x = cx + off * 86;
+			const y = cy + Math.abs(off) * 10 - (near ? Math.sin(t * 7) * 3 + gunKick * 14 : 0);
+			drawWeaponIcon(ctx, list[i] || "plasma", x, y, scale, off * .42, near);
+			ctx.font = "700 11px Fredoka, sans-serif";
+			ctx.textAlign = "center";
+			ctx.lineWidth = 3;
+			ctx.strokeStyle = "#1a140c";
+			ctx.fillStyle = near ? "#ffe14a" : "#f4f1e4";
+			const num = String(i % 4 + 1);
+			ctx.strokeText(num, x, y + 28 * Math.max(scale, .5));
+			ctx.fillText(num, x, y + 28 * Math.max(scale, .5));
+		}
+		const name = WEAPON_BY_ID[list[sel] || "plasma"].name;
+		ctx.font = "700 18px Fredoka, sans-serif";
+		ctx.textAlign = "center";
+		ctx.lineWidth = 5;
+		ctx.strokeStyle = "#1a140c";
+		ctx.fillStyle = "#fff6e4";
+		ctx.strokeText(name, cx, cy - 46);
+		ctx.fillText(name, cx, cy - 46);
+	}
+	function drawWeaponIcon(ctx, id, x, y, s, tilt, hot) {
+		ctx.save();
+		ctx.translate(x, y + (hot ? 0 : 4));
+		ctx.rotate(tilt);
+		ctx.scale(s, s);
+		ctx.lineJoin = "round";
+		ctx.lineCap = "round";
+		ctx.lineWidth = 4;
+		ctx.strokeStyle = "#1a140c";
+		ctx.fillStyle = hot ? "#fff6e4" : "#d9d3c4";
+		const accent = id === "flame" ? "#ff6a3d" : id === "rocket" ? "#ff5a68" : id === "sniper" ? "#c6e35a" : id === "laugh" ? "#ffe14a" : id === "bounce" ? "#3ec6ff" : "#7ec8ff";
+		const mark = () => {
+			ctx.fill();
+			ctx.stroke();
+		};
+		if (id === "dual") {
+			ctx.save();
+			ctx.translate(-8, 2);
+			ctx.rotate(-.4);
+			ctx.fillRect(-4, -3, 16, 7);
+			ctx.strokeRect(-4, -3, 16, 7);
+			ctx.fillRect(8, -2, 8, 4);
+			ctx.strokeRect(8, -2, 8, 4);
+			ctx.restore();
+			ctx.save();
+			ctx.translate(6, 6);
+			ctx.rotate(.35);
+			ctx.fillRect(-4, -3, 16, 7);
+			ctx.strokeRect(-4, -3, 16, 7);
+			ctx.fillRect(8, -2, 8, 4);
+			ctx.strokeRect(8, -2, 8, 4);
+			ctx.restore();
+		} else if (id === "sniper") {
+			ctx.fillRect(-18, -3, 34, 6);
+			ctx.strokeRect(-18, -3, 34, 6);
+			ctx.fillStyle = accent;
+			ctx.beginPath();
+			ctx.arc(4, -7, 5, 0, Math.PI * 2);
+			mark();
+			ctx.fillStyle = "#fff6e4";
+			ctx.fillRect(14, -2, 10, 4);
+			ctx.strokeRect(14, -2, 10, 4);
+		} else if (id === "rocket") {
+			ctx.fillRect(-16, -5, 26, 10);
+			ctx.strokeRect(-16, -5, 26, 10);
+			ctx.fillStyle = accent;
+			ctx.beginPath();
+			ctx.moveTo(10, -7);
+			ctx.lineTo(22, 0);
+			ctx.lineTo(10, 7);
+			ctx.closePath();
+			mark();
+			ctx.fillStyle = "#fff6e4";
+			ctx.fillRect(-18, -8, 6, 4);
+			ctx.strokeRect(-18, -8, 6, 4);
+			ctx.fillRect(-18, 4, 6, 4);
+			ctx.strokeRect(-18, 4, 6, 4);
+		} else if (id === "bounce") {
+			ctx.fillStyle = accent;
+			ctx.beginPath();
+			ctx.arc(0, 0, 12, 0, Math.PI * 2);
+			mark();
+			ctx.fillStyle = "#fff6e4";
+			ctx.fillRect(-12, -3, 24, 6);
+			ctx.strokeRect(-12, -3, 24, 6);
+		} else if (id === "laugh") {
+			ctx.fillStyle = accent;
+			ctx.beginPath();
+			ctx.arc(0, 0, 12, 0, Math.PI * 2);
+			mark();
+			ctx.fillStyle = "#1a140c";
+			ctx.beginPath();
+			ctx.arc(-4, -2, 1.6, 0, Math.PI * 2);
+			ctx.arc(4, -2, 1.6, 0, Math.PI * 2);
+			ctx.fill();
+			ctx.beginPath();
+			ctx.arc(0, 2, 5, .15, Math.PI - .15);
+			ctx.stroke();
+		} else if (id === "flame") {
+			ctx.fillRect(-3, 2, 6, 14);
+			ctx.strokeRect(-3, 2, 6, 14);
+			ctx.fillStyle = accent;
+			ctx.beginPath();
+			ctx.moveTo(0, -16);
+			ctx.quadraticCurveTo(12, -2, 0, 6);
+			ctx.quadraticCurveTo(-12, -2, 0, -16);
+			mark();
+		} else if (id === "knife") {
+			ctx.fillStyle = "#e7eef2";
+			ctx.beginPath();
+			ctx.moveTo(-4, 8);
+			ctx.lineTo(2, -16);
+			ctx.lineTo(6, 8);
+			ctx.closePath();
+			mark();
+			ctx.fillStyle = "#8a5a32";
+			ctx.fillRect(-3, 8, 8, 8);
+			ctx.strokeRect(-3, 8, 8, 8);
+		} else if (id === "melee" || id === "bat") {
+			ctx.rotate(-.6);
+			ctx.fillStyle = "#e7c48a";
+			ctx.beginPath();
+			ctx.roundRect(-4, -16, 8, 28, 4);
+			mark();
+			ctx.fillStyle = "#8a5a32";
+			ctx.fillRect(-3, 10, 6, 8);
+			ctx.strokeRect(-3, 10, 6, 8);
+		} else if (id === "drone") {
+			ctx.fillStyle = accent;
+			ctx.beginPath();
+			ctx.arc(0, 0, 6, 0, Math.PI * 2);
+			mark();
+			for (const [dx, dy] of [
+				[-10, -8],
+				[10, -8],
+				[-10, 8],
+				[10, 8]
+			]) {
+				ctx.fillStyle = "#fff6e4";
+				ctx.beginPath();
+				ctx.arc(dx, dy, 4, 0, Math.PI * 2);
+				mark();
+			}
+		} else {
+			ctx.fillRect(-14, -4, 22, 8);
+			ctx.strokeRect(-14, -4, 22, 8);
+			ctx.fillStyle = accent;
+			ctx.fillRect(6, -3, 12, 5);
+			ctx.strokeRect(6, -3, 12, 5);
+			ctx.fillStyle = "#fff6e4";
+			ctx.fillRect(-6, 4, 5, 8);
+			ctx.strokeRect(-6, 4, 5, 8);
+		}
+		ctx.restore();
 	}
 	function drawMini(ctx, w, h) {
 		if (!player) return;
-		const R = Math.min(78, w * .18);
-		const cx = 24 + R;
-		const cy = h - 24 - R;
+		const R = Math.min(68, w * .11);
+		const cx = w - 18 - R;
+		const cy = Math.min(h * .36, h - 240);
 		ctx.save();
 		ctx.beginPath();
 		ctx.arc(cx, cy, R, 0, Math.PI * 2);
@@ -4976,6 +5213,7 @@ function createGame(view, overlay, opts) {
 		};
 	}
 	function emit() {
+		pumpBanner();
 		const c = clockParts();
 		const rows = actors.filter((a) => a.state !== "gone").map((a) => ({
 			team: a.team,
@@ -5006,7 +5244,7 @@ function createGame(view, overlay, opts) {
 			boost,
 			feed: feed.slice(-5),
 			log: log.slice(-40),
-			banner: performance.now() - bannerAt < 1800 ? banner : "",
+			banner,
 			rows,
 			time: `${String(c.hours).padStart(2, "0")}:${String(c.mins).padStart(2, "0")}`,
 			date: c.date.toLocaleDateString("en-GB", {
@@ -5280,8 +5518,9 @@ function createGame(view, overlay, opts) {
 			actors.push(player);
 			yaw = player.yaw;
 			playing = true;
-			line(`pilot ${info.nick} on ${TEAMS[info.team].name}`);
-			line("link up · prediction live");
+			globalCall(`${info.nick} joined ${TEAMS[info.team].name}.`);
+			globalCall("Instructor: Steal an enemy flag and bring it home. Guard your own.");
+			globalCall("Instructor: Hold the yellow hill in the center for two minutes. Your team then runs faster.");
 			installProbe();
 			if (qa) {
 				const kinds = [
@@ -5375,6 +5614,10 @@ function createGame(view, overlay, opts) {
 		},
 		pushLine(s) {
 			line(s);
+			emit();
+		},
+		pushAnnounce(s) {
+			line(s, true);
 			emit();
 		},
 		failed: failWebgl
