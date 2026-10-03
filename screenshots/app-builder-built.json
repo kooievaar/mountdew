@@ -1,0 +1,41 @@
+{
+  "url": "http://127.0.0.1:8081/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Mount Dew",
+      "hasCanvas": true,
+      "bodyTextLen": 895,
+      "bodyTextHash": "75f8e12d3f2f5cd7f7869056d6f6b4911db4c359fd0bb6ce548277ec6674d1dc",
+      "bodyTextPrefix": "1.0.1 · AMSTERDAM-IX · 100 SEATS Mount Dew @sugoimeg Three teams",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Mount Dew",
+      "hasCanvas": true,
+      "bodyTextLen": 895,
+      "bodyTextHash": "75f8e12d3f2f5cd7f7869056d6f6b4911db4c359fd0bb6ce548277ec6674d1dc",
+      "bodyTextPrefix": "1.0.1 · AMSTERDAM-IX · 100 SEATS Mount Dew @sugoimeg Three teams",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-built.json",
+  "divergesFromBaseline": true,
+  "baselineReasons": [
+    "desktop: body text changed (1110 -> 895 chars, hash mismatch)",
+    "mobile: body text changed (1110 -> 895 chars, hash mismatch)"
+  ]
+}
