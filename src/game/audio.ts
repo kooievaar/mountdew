@@ -27,6 +27,7 @@ export type AudioBus = {
   announce: (text: string) => void;
   comment: (text: string) => void;
   intro: () => void;
+  cured: () => void;
   weather: (kind: string) => void;
   owl: () => void;
   birds: () => void;
@@ -60,6 +61,8 @@ const ID = {
   laugh: 19,
   wind: 20,
   rain: 21,
+  river: 22,
+  drink: 23,
 } as const;
 
 type Item = {
@@ -72,8 +75,6 @@ type Item = {
   loop?: boolean;
 };
 
-const VOWEL: Record<string, number> = { a: ID.a, e: ID.e, i: ID.i, o: ID.o, u: ID.u };
-
 export function createAudio(): AudioBus {
   let ctx: AudioContext | null = null;
   let master: GainNode | null = null;
@@ -83,9 +84,10 @@ export function createAudio(): AudioBus {
   let mode: "boot" | "worklet" | "buffer" = "boot";
   let started = false;
   let windOn = false;
+  const phraseSlot: string[] = [];
+  const loops = new Set<number>();
   let introDone = false;
   let stepAcc = 0;
-  let rainAcc = 0;
   const ear = { x: 0, y: 8, z: 0 };
   const pcm: Float32Array[] = [];
   const banks: AudioBuffer[] = [];
@@ -213,7 +215,143 @@ export function createAudio(): AudioBus {
     push(vowel(sr, 180, [350, 800, 2200], 0.95));
     push(laughLine(sr));
     push(noise(sr, 2.0, 0.08, 0.4, 70));
-    push(noise(sr, 0.35, 0.7, 0.45, 88));
+    push(rainBed(sr));
+    push(riverBed(sr));
+    push(drinkBed(sr));
+  }
+
+  function rainBed(sr: number) {
+    const len = Math.floor(sr * 2);
+    const b = new Float32Array(len);
+    const next = rng(90);
+    let y = 0;
+    for (let i = 0; i < len; i++) {
+      const white = next() * 2 - 1;
+      y += 0.22 * (white - y);
+      const drop = next() > 0.985 ? (next() * 2 - 1) * (0.4 + next()) : 0;
+      b[i] = y * 0.35 + drop;
+    }
+    return normalize(b, 0.55);
+  }
+
+  function riverBed(sr: number) {
+    const len = Math.floor(sr * 2);
+    const b = new Float32Array(len);
+    const next = rng(120);
+    for (let n = 0; n < 28; n++) {
+      const start = Math.floor(next() * (len - sr * 0.12));
+      const f = 680 + next() * 540;
+      let ph = 0;
+      const count = Math.floor(sr * (0.05 + next() * 0.07));
+      for (let i = 0; i < count && start + i < len; i++) {
+        const k = i / count;
+        ph += (2 * Math.PI * f) / sr;
+        b[start + i] += Math.sin(ph) * Math.pow(1 - k, 2.4) * (0.35 + next() * 0.4);
+      }
+    }
+    return normalize(b, 0.7);
+  }
+
+  function drinkBed(sr: number) {
+    const len = Math.floor(sr * 0.7);
+    const b = new Float32Array(len);
+    const next = rng(150);
+    for (let g = 0; g < 3; g++) {
+      const start = Math.floor(sr * (0.05 + g * 0.2));
+      let y = 0;
+      const count = Math.floor(sr * 0.16);
+      for (let i = 0; i < count && start + i < len; i++) {
+        y += 0.35 * ((next() * 2 - 1) - y);
+        const k = i / count;
+        const env = Math.sin(Math.min(1, k * 3) * Math.PI) * (1 - k);
+        b[start + i] += y * env + Math.sin((2 * Math.PI * 180 * i) / sr) * env * 0.4;
+      }
+    }
+    return normalize(b, 0.8);
+  }
+
+  function renderPhrase(text: string, pitch: number, sr: number) {
+    const words = text
+      .toLowerCase()
+      .replace(/[^a-z ]/g, "")
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 16);
+    const forms: Record<string, number[]> = {
+      a: [730, 1200, 2600],
+      e: [480, 1900, 2600],
+      i: [280, 2300, 3100],
+      o: [460, 860, 2400],
+      u: [320, 760, 2200],
+    };
+    const syl: { f: number; form: number[]; t: number }[] = [];
+    let t = 0.03;
+    const gap = 0.098;
+    for (const word of words) {
+      const n = Math.min(3, Math.max(1, Math.ceil(word.length / 3)));
+      for (let i = 0; i < n; i++) {
+        const slice = word.slice(i * 3, i * 3 + 3);
+        const v = (slice.match(/[aeiou]/) || ["a"])[0]!;
+        const scale = v === "i" ? 1.16 : v === "e" ? 1.06 : v === "o" || v === "u" ? 0.86 : 1;
+        syl.push({ f: Math.max(70, pitch * scale), form: forms[v] || forms.a!, t });
+        t += gap;
+      }
+      t += gap * 0.45;
+    }
+    if (!syl.length) syl.push({ f: pitch, form: forms.a!, t: 0.02 });
+    const len = Math.max(1, Math.floor(sr * (t + 0.22)));
+    const b = new Float32Array(len);
+    let p0 = 0;
+    let p1 = 0;
+    let p2 = 0;
+    let p3 = 0;
+    for (let i = 0; i < len; i++) {
+      const time = i / sr;
+      let env = 0;
+      let f = syl[0]!.f;
+      let form = syl[0]!.form;
+      for (const sy of syl) {
+        const u = (time - sy.t) / 0.09;
+        if (u < -0.35 || u > 2.4) continue;
+        const w = 0.5 - 0.5 * Math.cos(Math.min(1, Math.max(0, (u + 0.35) / 0.7)) * Math.PI);
+        const tail = u > 1 ? Math.exp(-(u - 1) * 2.4) : 1;
+        const e = w * tail;
+        if (e > env) {
+          env = e;
+          f = sy.f;
+          form = sy.form;
+        }
+      }
+      p0 += (2 * Math.PI * f) / sr;
+      p1 += (2 * Math.PI * form[0]!) / sr;
+      p2 += (2 * Math.PI * form[1]!) / sr;
+      p3 += (2 * Math.PI * form[2]!) / sr;
+      b[i] = (Math.sin(p0) * 0.62 + Math.sin(p0 * 2) * 0.12 + Math.sin(p1) * 0.2 + Math.sin(p2) * 0.1 + Math.sin(p3) * 0.05) * env;
+    }
+    return normalize(b, 0.92);
+  }
+
+  function storeBuf(id: number, data: Float32Array) {
+    pcm[id] = data;
+    const ab = ctx!.createBuffer(1, data.length, ctx!.sampleRate);
+    ab.getChannelData(0).set(data);
+    banks[id] = ab;
+    if (node && mode === "worklet") node.port.postMessage({ cmd: "addbuf", id, buf: data });
+  }
+
+  function phraseId(text: string, pitch: number) {
+    const key = `${Math.round(pitch)}|${text}`;
+    let slot = phraseSlot.indexOf(key);
+    if (slot < 0) {
+      if (phraseSlot.length < 36) phraseSlot.push(key);
+      else {
+        phraseSlot.shift();
+        phraseSlot.push(key);
+      }
+      slot = phraseSlot.indexOf(key);
+      storeBuf(24 + slot, renderPhrase(text, pitch, ctx!.sampleRate));
+    }
+    return 24 + slot;
   }
 
   function schedule() {
@@ -330,34 +468,26 @@ export function createAudio(): AudioBus {
     return { g, pan: Math.max(-1, Math.min(1, dx / 26)) };
   }
 
-  function rateOf(pitch: number) {
-    return Math.max(0.45, Math.min(2.5, pitch / 200));
+  function speak(text: string, pitch: number, gain: number, lane: number, pan: number) {
+    if (!text || gain < 0.004) return;
+    if (!ctx) boot();
+    if (!ctx) return;
+    kick({ id: phraseId(text, pitch), delay: 0, gain, rate: 1, pan, lane });
   }
 
-  function speak(text: string, pitch: number, gain: number, lane: number, pan: number, gap: number) {
-    const words = text
-      .toLowerCase()
-      .replace(/[^a-z0-9 ]/g, "")
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 14);
-    if (!words.length || gain < 0.004) return;
-    const rate = rateOf(pitch);
-    let t = 0.02;
-    let n = 0;
-    for (const word of words) {
-      const syl = Math.min(3, Math.max(1, Math.ceil(word.length / 3)));
-      for (let i = 0; i < syl; i++) {
-        if (n >= 36) return;
-        const slice = word.slice(i * 3, i * 3 + 3);
-        const v = (slice.match(/[aeiou]/) || ["a"])[0];
-        const scale = v === "i" ? 1.22 : v === "e" ? 1.08 : v === "o" || v === "u" ? 0.84 : 1;
-        kick({ id: VOWEL[v] || ID.a, delay: t, gain, rate: rate * scale, pan, lane });
-        t += gap;
-        n++;
-      }
-      t += gap * 0.42;
+  function boothPitch() {
+    const roll = Math.floor(Math.random() * 3);
+    return roll === 0 ? 118 : roll === 1 ? 210 : 336;
+  }
+
+  function setLoop(id: number, gain: number) {
+    if (!loops.has(id)) {
+      if (gain < 0.01) return;
+      loops.add(id);
+      kick({ id, delay: 0, gain, rate: 1, pan: 0, lane: 0, loop: true });
+      return;
     }
+    if (node && mode === "worklet") node.port.postMessage({ cmd: "gain", id, gain });
   }
 
   function shotId(kind: string) {
@@ -414,20 +544,20 @@ export function createAudio(): AudioBus {
       kick({ id: ID.boom, delay: 0, gain: 0.72 * p.g, rate: 1, pan: p.pan, lane: 0 });
     },
     voice(pitch: number, kind: string) {
-      speak(kind || "hey", pitch, 0.46, 1, 0, 0.09);
+      speak(kind || "hey", pitch, 0.46, 2, 0);
     },
     voiceAt(x: number, y: number, z: number, pitch: number, kind: string, line: string, self: boolean) {
       const p = self ? { g: 1, pan: 0 } : place(x, y, z, 30);
       if (p.g < 0.02) return;
-      speak(line || kind || "hey", pitch, (self ? 0.56 : 0.34) * p.g, self ? 1 : 0, p.pan, self ? 0.092 : 0.078);
+      speak(line || kind || "hey", pitch, (self ? 0.56 : 0.34) * p.g, self ? 2 : 0, p.pan);
     },
     help(pitch: number) {
-      speak("help", pitch, 0.5, 1, 0, 0.1);
+      speak("help", pitch, 0.5, 2, 0);
     },
     helpAt(x: number, y: number, z: number, pitch: number, self: boolean) {
       const p = self ? { g: 1, pan: 0 } : place(x, y, z, 28);
       if (p.g < 0.02) return;
-      speak("help", pitch, (self ? 0.52 : 0.32) * p.g, self ? 1 : 0, p.pan, 0.1);
+      speak("help", pitch, (self ? 0.52 : 0.32) * p.g, self ? 2 : 0, p.pan);
     },
     splash() {
       kick({ id: ID.splash, delay: 0, gain: 0.22, rate: 1, pan: 0, lane: 0 });
@@ -466,17 +596,14 @@ export function createAudio(): AudioBus {
     announce(text: string) {
       const line = text.replace(/\s+/g, " ").trim().slice(0, 180);
       if (!line) return;
-      kick({ id: ID.ding, delay: 0, gain: 0.28, rate: 0.72, pan: 0, lane: 2 });
-      speak(line, 168, 0.62, 1, 0, 0.108);
+      speak(line, boothPitch(), 0.78, 1, 0);
     },
     intro() {
       boot();
       const speakIntro = () => {
         if (introDone) return;
         introDone = true;
-        const roll = Math.floor(Math.random() * 3);
-        const pitch = roll === 0 ? 150 : roll === 1 ? 240 : 360;
-        speak("Mount Dew Ow yes", pitch, 0.7, 1, 0, 0.12);
+        speak("Mount Dew Oh yesss", boothPitch(), 0.86, 1, 0);
       };
       if (ctx && ctx.state !== "running") {
         void ctx.resume().then(speakIntro);
@@ -484,15 +611,21 @@ export function createAudio(): AudioBus {
       }
       speakIntro();
     },
+    cured() {
+      kick({ id: ID.splash, delay: 0, gain: 0.42, rate: 1, pan: 0, lane: 2 });
+      kick({ id: ID.drink, delay: 0.1, gain: 0.58, rate: 1, pan: 0, lane: 2 });
+      speak("Heatstroke cured", boothPitch(), 0.86, 1, 0);
+    },
     comment(text: string) {
       const line = text.replace(/\s+/g, " ").trim().slice(0, 180);
       if (!line) return;
-      speak(line, 250, 0.5, 1, 0, 0.1);
+      speak(line, boothPitch(), 0.6, 1, 0);
     },
     weather(kind: string) {
-      if (kind === "rain") kick({ id: ID.rain, delay: 0, gain: 0.12, rate: 1, pan: 0, lane: 0 });
-      else if (kind === "snow") kick({ id: ID.bird, delay: 0, gain: 0.06, rate: 0.7, pan: 0, lane: 0 });
-      else kick({ id: ID.ding, delay: 0, gain: 0.08, rate: 0.6, pan: 0, lane: 0 });
+      if (kind === "rain") setLoop(ID.rain, 0.22);
+      else if (kind === "snow") setLoop(ID.rain, 0.06);
+      else setLoop(ID.rain, 0);
+      setLoop(ID.river, kind === "rain" ? 0.08 : 0);
     },
     owl() {
       kick({ id: ID.owl, delay: 0, gain: 0.16, rate: 1, pan: 0.2, lane: 0 });
@@ -513,11 +646,14 @@ export function createAudio(): AudioBus {
         }
       }
       if (weather === "rain") {
-        rainAcc += dt;
-        if (rainAcc > 0.45) {
-          rainAcc = 0;
-          kick({ id: ID.rain, delay: 0, gain: 0.05, rate: 0.8 + Math.random() * 0.4, pan: Math.random() * 1.4 - 0.7, lane: 0 });
-        }
+        setLoop(ID.rain, 0.2);
+        setLoop(ID.river, water ? 0.36 : 0.08);
+      } else if (weather === "snow") {
+        setLoop(ID.rain, 0.05);
+        setLoop(ID.river, 0);
+      } else {
+        setLoop(ID.rain, 0);
+        setLoop(ID.river, 0);
       }
     },
     dispose() {

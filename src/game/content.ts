@@ -66,7 +66,10 @@ export type AbilityId =
   | "wall"
   | "tesla"
   | "winner"
-  | "flux";
+  | "flux"
+  | "elbow"
+  | "spotlight"
+  | "loud";
 
 export type CharDef = {
   id: string;
@@ -109,6 +112,9 @@ export const CHARACTERS: CharDef[] = [
   { id: "donnie", name: "The Donald", blurb: "Cartoon showman. Killstreaks become Winner calls. Twenty is god mode.", hair: 0xf0d060, cloth: 0x1a2a6b, skin: 0xf0b070, style: "sport", ability: "winner", abilityName: "You're fired", weapons: ["plasma", "rocket", "melee"], jumps: 2, voice: 180 },
   { id: "elon", name: "The Elon", blurb: "Throws a different car every time and will not stop selling it.", hair: 0x6b4a32, cloth: 0x1a1a1a, skin: 0xf0c8a8, style: "sport", ability: "tesla", abilityName: "Throw a car", weapons: ["rocket", "plasma", "melee"], jumps: 2, voice: 240 },
   { id: "flux", name: "Ensign Flux", blurb: "Laser pistol. Boom. Fluxxed you right in the capaciter.", hair: 0xc9a06a, cloth: 0xc6a15a, skin: 0xf0d0b4, style: "sport", ability: "flux", abilityName: "Flux pistol", weapons: ["plasma", "sniper", "knife"], jumps: 2, voice: 360 },
+  { id: "rock", name: "The Rock", blurb: "Most-followed movie star, 2026. Eyebrow, elbow, and a catchphrase you can smell.", hair: 0x1a120c, cloth: 0x1a1a1a, skin: 0xc68658, style: "sport", ability: "elbow", abilityName: "People's elbow", weapons: ["melee", "rocket", "plasma"], jumps: 2, voice: 110 },
+  { id: "zendaya", name: "Zendaya", blurb: "Most-followed actress, 2026. Spotlight, long curls, and a line that holds the hill.", hair: 0x2a140c, cloth: 0x1f6b45, skin: 0xc48a62, style: "doll", ability: "spotlight", abilityName: "Spotlight", weapons: ["plasma", "sniper", "laugh"], jumps: 2, voice: 280 },
+  { id: "jlo", name: "JLo", blurb: "Jenny from the block. Gets loud, dances the reload, and does not miss the drop.", hair: 0x1a0c08, cloth: 0xe6b325, skin: 0xd09a6a, style: "sport", ability: "loud", abilityName: "Let's get loud", weapons: ["dual", "plasma", "laugh"], jumps: 2, voice: 230 },
 ];
 
 export const CHAR_BY_ID = Object.fromEntries(CHARACTERS.map((c) => [c.id, c]));
@@ -219,6 +225,9 @@ const FLIGHT: Record<string, string[]> = {
   donnie: ["joohoo tremendous", "joohoo winner", "joohoo!"],
   elon: ["joohoo to mars", "joohoo buy this", "joohoo!"],
   flux: ["joohoo flux", "joohoo capaciter", "joohoo!"],
+  rock: ["joohoo finally", "can you smell it", "joohoo bring it"],
+  zendaya: ["joohoo watch this", "joohoo from oakland", "joohoo!"],
+  jlo: ["joohoo get loud", "joohoo on the block", "joohoo!"],
 };
 
 const CHATTER: Record<string, string[]> = {
@@ -247,6 +256,9 @@ const CHATTER: Record<string, string[]> = {
   donnie: ["tremendous pilot", "you're looking at a winner", "the best jump", "everybody says so"],
   elon: ["the car is the argument", "different model, same point", "they see me rollin", "mars can wait one flag"],
   flux: ["fluxxed in the capaciter", "laser says hello", "boom, politely", "ensign on the hill"],
+  rock: ["Can you smell what the Rock is cooking", "Just bring it", "Know your role", "Finally the Rock has come back", "If you smell what I am cooking"],
+  zendaya: ["Watch me", "I am still that girl from Oakland", "This is my light", "I make the spotlight", "Hold the hill with me"],
+  jlo: ["Let's get loud", "Jenny from the block", "Love don't cost a thing", "I ain't going nowhere", "On the six"],
 };
 
 export function spokenLine(charId: string, key: string): string {

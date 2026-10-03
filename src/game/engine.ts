@@ -52,6 +52,7 @@ export type HudState = {
   console: boolean;
   menu: boolean;
   spectate: boolean;
+  heat: number;
 };
 
 type TouchState = {
@@ -142,6 +143,13 @@ type Actor = {
   spreeAt: number;
   lifeStreak: number;
   fall: number;
+  mood: string;
+  moodT: number;
+  wet: number;
+  lookX: number;
+  lookZ: number;
+  heatSick: boolean;
+  veins: number;
 };
 
 type Dyn = Solid & { alive: boolean; kind: string; team: number; cool: number; link: number; yaw: number };
@@ -246,6 +254,12 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
   let clock0 = performance.now() / 1000 - (15 / 24) * DAY;
   let weather: "clear" | "cloudy" | "sun" | "rain" | "snow" = "sun";
   let weatherT = 25;
+  let heatLeft = 0;
+  let heatArm = 48;
+  let lightX = 0.35;
+  let lightY = 0.8;
+  let lightZ = 0.15;
+  let meteorIn = 12;
   let prevSun = 1;
   let trainAng = 0.4;
   let trainToot = 0;
@@ -295,7 +309,7 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
   }
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.02;
+  renderer.toneMappingExposure = 1.12;
   renderer.shadowMap.enabled = false;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.setPixelRatio(1);
@@ -307,6 +321,9 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
   const hemi = new THREE.HemisphereLight(0xb9dcff, 0x8fbf62, 0.85);
   scene.add(hemi);
   scene.add(new THREE.AmbientLight(0xfff6ea, 0.38));
+  const rim = new THREE.DirectionalLight(0x9ec4ff, 0.35);
+  rim.position.set(-24, 18, -30);
+  scene.add(rim);
   const sun = new THREE.DirectionalLight(0xfff2d0, 1.1);
   sun.position.set(40, 60, 20);
   sun.castShadow = false;
@@ -346,6 +363,43 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     new THREE.MeshBasicMaterial({ color: 0xfff3b0, fog: false, depthWrite: false }),
   );
   scene.add(sunDisc);
+  const moonDisc = new THREE.Mesh(
+    new THREE.SphereGeometry(9, 14, 10),
+    new THREE.MeshBasicMaterial({ color: 0xdfe7ff, fog: false, depthWrite: false }),
+  );
+  scene.add(moonDisc);
+  const moon = new THREE.DirectionalLight(0xb7c6ff, 0);
+  moon.position.set(-30, 40, -10);
+  scene.add(moon);
+  const flareMat = new THREE.MeshBasicMaterial({ color: 0xffe7a8, transparent: true, opacity: 0.55, fog: false, depthWrite: false, blending: THREE.AdditiveBlending });
+  const flares = [1.8, 0.7, 0.35].map((s, i) => {
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(18 * s, 18 * s), flareMat.clone());
+    (mesh.material as THREE.MeshBasicMaterial).opacity = 0.28 - i * 0.06;
+    mesh.visible = false;
+    scene.add(mesh);
+    return mesh;
+  });
+  const starPositions: number[] = [];
+  const starColors: number[] = [];
+  for (let i = 0; i < 160; i++) {
+    const az = (i * 2.399) % (Math.PI * 2);
+    const el = 0.18 + ((i * 47) % 100) / 100 * 1.15;
+    const r = 330;
+    starPositions.push(Math.cos(el) * Math.sin(az) * r, Math.sin(el) * r, Math.cos(el) * Math.cos(az) * r);
+    const tint = i % 5 === 0 ? [1, 0.82, 0.45] : i % 4 === 0 ? [0.75, 0.85, 1] : [1, 0.98, 0.92];
+    starColors.push(tint[0]!, tint[1]!, tint[2]!);
+  }
+  const starGeo = new THREE.BufferGeometry();
+  starGeo.setAttribute("position", new THREE.Float32BufferAttribute(starPositions, 3));
+  starGeo.setAttribute("color", new THREE.Float32BufferAttribute(starColors, 3));
+  const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ size: 4.2, vertexColors: true, fog: false, sizeAttenuation: false, transparent: true, opacity: 0 }));
+  scene.add(stars);
+  const meteor = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.12, 0.55, 16, 5),
+    new THREE.MeshBasicMaterial({ color: 0xfff1c9, fog: false, transparent: true, opacity: 0.9 }),
+  );
+  meteor.visible = false;
+  scene.add(meteor);
   const clouds = new THREE.Group();
   for (let i = 0; i < 10; i++) {
     const puff = new THREE.Mesh(
@@ -688,7 +742,18 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     scene.add(mesh);
   }
 
-  const ringMat = new THREE.MeshBasicMaterial({ color: 0xd7ff6a, transparent: true, opacity: 0.55, depthWrite: false });
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0xd7ff6a, transparent: true, opacity: 0.22, depthWrite: false });
+  const windMat = new THREE.LineBasicMaterial({ color: 0xf4fff8, transparent: true, opacity: 0.45 });
+  const windLines: { line: THREE.Line; stream: number; t: number }[] = [];
+  world.streams.forEach((stream, si) => {
+    for (let k = 0; k < 5; k++) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(18), 3));
+      const line = new THREE.Line(geo, windMat);
+      scene.add(line);
+      windLines.push({ line, stream: si, t: k / 5 });
+    }
+  });
   for (const s of world.streams) {
     for (const p of s.pts) {
       const ring = new THREE.Mesh(new THREE.TorusGeometry(1.35, 0.07, 8, 18), ringMat);
@@ -838,6 +903,10 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     a.voiceCd = key === "die" ? 0.4 : a === player ? 0.45 : a.minion ? 1.35 : 1.6;
     a.speech = spokenLine(a.charId, key);
     a.speechT = key === "die" ? 1.4 : 1.35;
+    if (a.moodT < 0.25) {
+      a.mood = key === "die" || key === "down" ? "cry" : "talk";
+      a.moodT = a.speechT;
+    }
     const ch = CHAR_BY_ID[a.charId];
     audio.voiceAt(a.x, a.y + 1.2, a.z, ch?.voice || 440, key, a.speech, a === player);
   }
@@ -875,6 +944,15 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       pack: 0,
       packColor: 0x3a4450,
     };
+    if (ch.ability === "elbow") {
+      return { ...base, petite: 1.18, hair: [0.22, 0.12, 0.22, 0.02] as [number, number, number, number], skirt: 0.001, puff: 0.2 };
+    }
+    if (ch.ability === "spotlight") {
+      return { ...base, petite: 0.94, hair: [0.4, 1.2, 0.28, -0.12] as [number, number, number, number], skirt: 0.9, skirtColor: 0xd6b25e };
+    }
+    if (ch.ability === "loud") {
+      return { ...base, petite: 0.97, hair: [0.26, 0.78, 0.16, 0.22] as [number, number, number, number], skirt: 0.75, skirtColor: 0xe6b325 };
+    }
     if (ch.ability === "glide") {
       return { ...base, petite: 0.86, bangs: [0.46, 0.18, 0.3] as [number, number, number], hair: [0.36, 1.05, 0.12, -0.18] as [number, number, number, number], skirt: 1, skirtColor: 0xfff3c4, wings: 1, wingColor: 0xfffaf6 };
     }
@@ -985,6 +1063,20 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     return { x: c * world.trainR, y: world.trainY, z: s * world.trainR, rx: c, rz: s, tx: -s, tz: c };
   }
 
+  function emote(a: Actor, mood: string, seconds: number, look: Actor | null) {
+    a.mood = mood;
+    a.moodT = seconds;
+    const at = look || player;
+    if (at && at !== a) {
+      a.lookX = at.x;
+      a.lookZ = at.z;
+    } else {
+      a.lookX = a.x - Math.sin(a.yaw) * 6;
+      a.lookZ = a.z - Math.cos(a.yaw) * 6;
+    }
+    if (mood === "angry") a.veins = a.hp < 45 ? 4 : 3;
+  }
+
   function hurt(a: Actor, dmg: number, src: Actor | null, head: boolean) {
     if (a.state !== "live" || a.invuln > 0) return;
     if (qa && a === player) return;
@@ -994,6 +1086,7 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     const bonus = 1 + Math.min(0.15, lvl * 0.004);
     a.hp -= dmg * bonus * (src?.minion ? 0.45 : 1) * (ch?.ability === "necro" && src?.minion ? 1.4 : 1);
     a.flash = 0.15;
+    if (a.hp > 0) emote(a, "angry", 1.35, src);
     if (a === player) shake = Math.min(0.4, shake + 0.12);
     if (a.hp <= 0) {
       a.hp = 0;
@@ -1046,6 +1139,8 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
         if (src.charId === "donnie") say(src, "You're fired!");
       }
       say(a, "die");
+      emote(a, "cry", 1.8, src);
+      if (src) emote(src, "wave", 1.5, a);
       for (let i = 0; i < 8; i++) burst(a.x, a.y + 1, a.z, 0xffd27a, 4);
     }
   }
@@ -1189,6 +1284,13 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       spreeAt: 0,
       lifeStreak: 0,
       fall: 1,
+      mood: "",
+      moodT: 0,
+      wet: 0,
+      lookX: 0,
+      lookZ: 0,
+      heatSick: false,
+      veins: 0,
     };
     return a;
   }
@@ -1255,6 +1357,7 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     let s = a.minion ? 2.7 : 8.5;
     if (a.slow > 0) s *= 0.55;
     if (a.inWater) s *= 0.64;
+    if (heatLeft > 0 && a.heatSick) s *= 0.5;
     if (charOf(a).ability === "bunny") s *= a.bunny;
     if (boost && a.team === hillOwner) s *= 1.2;
     for (const o of actors) {
@@ -1598,17 +1701,20 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       const glide = ch.ability === "glide" && jumpHeld && a.vy < 0 && !a.grounded;
       if (ch.ability === "jet" && jumpHeld && !a.grounded && a.fuel > 0) {
         a.vy += 24 * dt;
+        if (!bot && a === player) a.vy += Math.sin(pitch) * 14 * dt;
         a.vy = Math.min(a.vy, 9);
         a.fuel -= dt * 0.35;
       }
       if (ch.ability === "bird" && jumpHeld && !a.grounded && a.fuel > 0 && a.jumps >= ch.jumps) {
         a.vy += 20 * dt;
+        if (!bot && a === player) a.vy += Math.sin(pitch) * 12 * dt;
         a.vy = Math.min(a.vy, 7.5);
         a.fuel -= dt * 0.25;
       }
       if (a.hover && a.fuel > 0) {
         a.vy += (0 - a.vy) * (1 - Math.exp(-6 * dt));
         if (jumpHeld) a.vy += 8 * dt;
+        if (!bot && a === player) a.vy += Math.sin(pitch) * 10 * dt;
         a.fuel -= dt * 0.18;
         if (a.fuel <= 0) a.hover = false;
       }
@@ -1620,7 +1726,7 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       }
       if (!a.hover && !glide && a.puff <= 0) a.vy -= 28 * dt;
       else if (a.puff > 0) a.vy -= 8 * dt;
-      if (glide) a.vy = -1.65;
+      if (glide) a.vy = -1.65 + (!bot && a === player ? Math.sin(pitch) * 6.5 : 0);
       if (!a.minion && !a.grounded && wall && fwd > 0.2) {
         const into = a.vx * -wall.nx + a.vz * -wall.nz;
         if (into > 0) {
@@ -1630,6 +1736,9 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
         const ride = ch.ability === "wall" ? 0.35 : 3.1;
         if (a.vy < -ride) a.vy = -ride;
         if (a === player && Math.random() < 0.02) a.pendingXp += 1;
+      }
+      if (!bot && a === player && !a.grounded && !a.climb && !glide && !a.hover && a.puff <= 0) {
+        a.vy += Math.sin(pitch) * 5 * dt;
       }
       if (!bot && actEdge) {
         if (BUILD_ACTIONS[a.build]?.id === "ability" || a.build === 0) useAbility(a);
@@ -1681,6 +1790,15 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       audio.splashAt(a.x, a.y, a.z);
       say(a, "water");
       burst(a.x, 0.4, a.z, 0x9fe7ff, 8);
+    }
+    if (a.inWater && a.heatSick) {
+      a.heatSick = false;
+      a.mood = "happy";
+      a.moodT = 1.4;
+      if (a === player) {
+        audio.cured();
+        line("HEATSTROKE CURED!", true);
+      }
     }
     a.wasWater = a.inWater;
     a.wasGround = a.grounded;
@@ -2028,6 +2146,40 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       a.abilityCd = 1.1;
       shoot(a, "plasma");
       say(a, "boom fluxxed you right in the capaciter");
+    } else if (ch.ability === "elbow") {
+      a.vy = Math.max(a.vy, 7.5);
+      a.abilityCd = 4.5;
+      a.lunge = 0.28;
+      for (const o of actors) {
+        if (o !== a && o.state === "live" && o.team !== a.team && Math.hypot(o.x - a.x, o.z - a.z) < 3.2) hurt(o, 36, a, false);
+      }
+      emote(a, "wave", 0.8, null);
+      say(a, "Can you smell what the Rock is cooking");
+    } else if (ch.ability === "spotlight") {
+      a.abilityCd = 7;
+      a.shade = 0.4;
+      for (const o of actors) {
+        if (o !== a && o.state === "live" && o.team !== a.team && Math.hypot(o.x - a.x, o.z - a.z) < 9) {
+          o.slow = Math.max(o.slow, 1.4);
+          emote(o, "exclaim", 0.8, a);
+        }
+      }
+      burst(a.x, a.y + 1.6, a.z, 0xfff1c2, 14);
+      say(a, "Watch me");
+    } else if (ch.ability === "loud") {
+      a.abilityCd = 6;
+      for (const o of actors) {
+        if (o !== a && o.state === "live" && Math.hypot(o.x - a.x, o.z - a.z) < 8) {
+          const dx = o.x - a.x;
+          const dz = o.z - a.z;
+          const len = Math.hypot(dx, dz) || 1;
+          o.vx += (dx / len) * 8;
+          o.vz += (dz / len) * 8;
+          if (o.team !== a.team) hurt(o, 12, a, false);
+        }
+      }
+      emote(a, "exclaim", 1, null);
+      say(a, "Let's get loud");
     } else if (ch.id === "cloudy") {
       a.vy = Math.max(a.vy, 8);
       a.abilityCd = 3;
@@ -2244,6 +2396,8 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
           o.pendingXp += 40;
           line(`${o.name} revived ${a.name}`, true);
           say(a, "yay");
+          emote(o, "wave", 1.4, a);
+          emote(a, "happy", 1.2, o);
           return;
         }
       }
@@ -2369,6 +2523,22 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       audio.weather(weather);
       line(`Weather ${weather}`);
     }
+    const body = skyBody(c.hoursF, c.date);
+    if (weather === "sun" && body.sun.alt > 0.2) {
+      heatArm -= dt * (c.season === "Summer" ? 1 : 0.4);
+      if (heatLeft <= 0 && heatArm <= 0) {
+        heatLeft = 60;
+        heatArm = 70 + Math.random() * 80;
+        for (const a of actors) if (a.state === "live") a.heatSick = true;
+        globalCall("HEATSTROKE");
+        audio.announce("Heatstroke. One minute. Find the river.");
+      }
+    }
+    if (heatLeft > 0) {
+      heatLeft = Math.max(0, heatLeft - dt);
+      if (heatLeft <= 0) for (const a of actors) a.heatSick = false;
+    }
+    const wetSky = weather === "rain" || weather === "snow";
     trainAng += dt * 0.22;
     trainToot -= dt;
     if (trainToot <= 0) {
@@ -2391,6 +2561,15 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     }
     for (const a of actors) {
       if (a.state === "gone") continue;
+      a.moodT = Math.max(0, a.moodT - dt);
+      if (a.moodT <= 0 && a.mood !== "depressed") a.mood = "";
+      a.veins = a.mood === "angry" ? a.veins : Math.max(0, a.veins - dt * 2);
+      if (wetSky && a.state === "live") a.wet = Math.min(40, a.wet + dt);
+      else a.wet = Math.max(0, a.wet - dt * 1.7);
+      if (a.wet > 14 && a.state === "live") {
+        a.mood = "depressed";
+        a.moodT = 1.4;
+      } else if (a.mood === "depressed" && a.wet < 2) a.mood = "";
       if (a.remote) {
         const k = 1 - Math.exp(-8 * dt);
         a.x += (a.tx - a.x) * k;
@@ -2935,6 +3114,19 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     const sheep = (actor?.sheep || 0) > 0;
     const gray = !!actor && actor.hp === 0 && actor.state !== "down";
     const down = !actor || actor.state === "down" || ease > 0.95;
+    const mood = actor?.mood || "";
+    const talking = mood === "talk" || mood === "angry" || mood === "cry" || mood === "exclaim" || mood === "wave" || mood === "happy" || (actor?.speechT || 0) > 0;
+    let lookYaw = 0;
+    if (actor && (Math.abs(actor.lookX) + Math.abs(actor.lookZ) > 0.1)) {
+      const dx = actor.lookX - actor.x;
+      const dz = actor.lookZ - actor.z;
+      let d = Math.atan2(-dx, -dz) - actor.yaw;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      lookYaw = clamp(d, -1.1, 1.1);
+    }
+    const angry = mood === "angry";
+    const skin = gray ? 0x9a9a9a : angry ? lerpHex(ch.skin, 0x6a1020, 0.72) : ch.skin;
     return {
       x,
       y,
@@ -2950,9 +3142,9 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       fall: actor?.state === "down" ? actor.fall : ease,
       bounce: !!actor && actor.grounded && actor.sinceLand < 0.16,
       sheep,
-      scale: (ch.style === "round" || sheep ? 1.12 : look.petite) * (actor?.flat ? 1.05 : 1),
+      scale: (ch.id === "rock" ? 1.16 : ch.style === "round" || sheep ? 1.12 : look.petite) * (actor?.flat ? 1.05 : 1),
       squash: actor?.flat ? 0.72 : 1,
-      skin: gray ? 0x9a9a9a : ch.skin,
+      skin,
       hair: gray ? 0x777777 : ch.hair,
       cloth: gray ? 0x8a8a8a : ch.cloth,
       hairLen: sheep ? 0.25 : 0.45 + look.hair[1],
@@ -2962,22 +3154,165 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       halo: ch.ability === "glide" && !gray && !down && !sheep,
       gun: !down && !sheep && !gray && !actor?.minion,
       id: actor?.id ?? -1,
+      mood,
+      mouth: talking ? Math.floor(performance.now() / 200) % 2 : -1,
+      veins: angry ? Math.round(actor?.veins || 3) : 0,
+      look: lookYaw,
+      angry,
+      sunX: lightX,
+      sunY: Math.max(-0.2, lightY),
+      sunZ: lightZ,
+      lean: actor && !down ? clamp((actor.climb ? 0.55 : 0) + (actor.grounded ? 0 : -actor.vy * 0.045), -0.65, 0.7) : 0,
+      bank: actor && !down ? clamp(-(actor.vx * Math.cos(actor.yaw) + actor.vz * -Math.sin(actor.yaw)) * 0.055, -0.42, 0.42) : 0,
     };
+  }
+
+  function lerpHex(a: number, b: number, t: number) {
+    const ar = (a >> 16) & 255;
+    const ag = (a >> 8) & 255;
+    const ab = a & 255;
+    const br = (b >> 16) & 255;
+    const bg = (b >> 8) & 255;
+    const bb = b & 255;
+    const r = Math.round(ar + (br - ar) * t);
+    const g = Math.round(ag + (bg - ag) * t);
+    const bl = Math.round(ab + (bb - ab) * t);
+    return (r << 16) | (g << 8) | bl;
+  }
+
+  function skyBody(hoursF: number, date: Date) {
+    const lat = (35.2 * Math.PI) / 180;
+    const solar = hoursF + (-115.5 / 15 - -8);
+    const n = Math.floor((Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) - Date.UTC(date.getUTCFullYear(), 0, 0)) / 86400000);
+    const decl = 0.4093 * Math.sin((2 * Math.PI * (284 + n)) / 365);
+    const H = ((solar - 12) * 15 * Math.PI) / 180;
+    const alt = Math.asin(clamp(Math.sin(lat) * Math.sin(decl) + Math.cos(lat) * Math.cos(decl) * Math.cos(H), -1, 1));
+    let az = Math.acos(clamp((Math.sin(decl) * Math.cos(lat) - Math.cos(decl) * Math.sin(lat) * Math.cos(H)) / Math.max(0.08, Math.cos(alt)), -1, 1));
+    if (H > 0) az = Math.PI * 2 - az;
+    const cosA = Math.cos(alt);
+    const phase = ((n % 29.53) / 29.53) * Math.PI * 2;
+    const mH = H + Math.PI * (1 + 0.08 * Math.sin(phase));
+    const mDecl = decl * 0.35 + Math.sin(phase) * 0.08;
+    const mAlt = Math.asin(clamp(Math.sin(lat) * Math.sin(mDecl) + Math.cos(lat) * Math.cos(mDecl) * Math.cos(mH), -1, 1));
+    let mAz = Math.acos(clamp((Math.sin(mDecl) * Math.cos(lat) - Math.cos(mDecl) * Math.sin(lat) * Math.cos(mH)) / Math.max(0.08, Math.cos(mAlt)), -1, 1));
+    if (Math.sin(mH) > 0) mAz = Math.PI * 2 - mAz;
+    const mCos = Math.cos(mAlt);
+    return {
+      sun: { x: cosA * Math.sin(az), y: Math.sin(alt), z: cosA * Math.cos(az), alt },
+      moon: { x: mCos * Math.sin(mAz), y: Math.sin(mAlt), z: mCos * Math.cos(mAz), alt: mAlt },
+    };
+  }
+
+  function paintSky(day: number, season: string) {
+    const pal =
+      season === "Summer"
+        ? [0.2, 0.48, 0.92, 1, 0.7, 0.28]
+        : season === "Autumn"
+          ? [0.38, 0.28, 0.55, 0.96, 0.4, 0.18]
+          : season === "Winter"
+            ? [0.5, 0.62, 0.78, 0.78, 0.84, 0.92]
+            : [0.32, 0.58, 0.95, 1, 0.68, 0.55];
+    const night = 1 - day;
+    const attr = skyGeo.attributes.color as THREE.BufferAttribute;
+    for (let i = 0; i < skyPos.count; i++) {
+      const elev = skyPos.getY(i) / 380;
+      const t = elev < 0 ? 0 : Math.pow(clamp(elev / 0.5, 0, 1), 0.6);
+      const hr = pal[3]! * (1 - t) + pal[0]! * t;
+      const hg = pal[4]! * (1 - t) + pal[1]! * t;
+      const hb = pal[5]! * (1 - t) + pal[2]! * t;
+      const nr = 0.1 * (1 - t) + 0.02 * t;
+      const ng = 0.12 * (1 - t) + 0.03 * t;
+      const nb = 0.26 * (1 - t) + 0.08 * t;
+      attr.setXYZ(i, hr * day + nr * night, hg * day + ng * night, hb * day + nb * night);
+    }
+    attr.needsUpdate = true;
+  }
+
+  function streamPoint(stream: { pts: { x: number; y: number; z: number }[] }, t: number) {
+    const pts = stream.pts;
+    if (pts.length < 2) return pts[0] || { x: 0, y: 8, z: 0 };
+    const span = (pts.length - 1) * t;
+    const i = Math.min(pts.length - 2, Math.floor(span));
+    const f = span - i;
+    const a = pts[i]!;
+    const b = pts[i + 1]!;
+    return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, z: a.z + (b.z - a.z) * f };
   }
 
   function render() {
     const c = clockParts();
-    const t = ((c.hoursF - 6) / 24) * Math.PI * 2;
-    const sunV = tmp.set(Math.cos(t), Math.sin(t), 0.25).normalize();
-    const day = THREE.MathUtils.smoothstep(sunV.y, -0.25, 0.45);
-    skyMat.color.setRGB(0.22 + day * 0.78, 0.28 + day * 0.72, 0.55 + day * 0.45);
-    hemi.intensity = 0.28 + day * 0.4;
-    hemi.color.set(day > 0.4 ? 0xcfe6ff : 0x223044);
-    sun.intensity = 0.35 + day * 1.35;
-    sun.position.copy(sunV).multiplyScalar(70);
-    sunDisc.position.copy(sunV).multiplyScalar(300);
-    (sunDisc.material as THREE.MeshBasicMaterial).color.set(day > 0.25 ? 0xfff3b0 : 0xffb07a);
-    clouds.position.x = Math.sin(performance.now() / 8000) * 6;
+    const body = skyBody(c.hoursF, c.date);
+    const sunV = tmp.set(body.sun.x, body.sun.y, body.sun.z);
+    if (sunV.lengthSq() < 0.001) sunV.set(0.2, 0.2, 0.2);
+    sunV.normalize();
+    const day = THREE.MathUtils.smoothstep(body.sun.alt, -0.18, 0.28);
+    const night = 1 - day;
+    const moonUp = THREE.MathUtils.smoothstep(body.moon.alt, -0.05, 0.25) * night;
+    paintSky(day, c.season);
+    skyMat.color.setRGB(1, 1, 1);
+    hemi.intensity = 0.22 + day * 0.55 + moonUp * 0.18;
+    hemi.color.set(day > 0.45 ? (c.season === "Autumn" ? 0xffc08a : c.season === "Winter" ? 0xd5e4f2 : 0xcfe6ff) : 0x243044);
+    hemi.groundColor.set(c.season === "Winter" ? 0xc5d0dc : c.season === "Autumn" ? 0x8a5a32 : c.season === "Summer" ? 0xc6a24a : 0x7eaa55);
+    sun.intensity = Math.max(0, body.sun.alt) * (weather === "rain" ? 0.45 : 1.35);
+    sun.position.copy(sunV).multiplyScalar(80);
+    sun.color.set(c.season === "Summer" ? 0xfff0c2 : c.season === "Winter" ? 0xfff6ea : 0xffe0b0);
+    lightX = sunV.x;
+    lightY = body.sun.alt > 0.02 ? sunV.y : body.moon.y;
+    lightZ = body.sun.alt > 0.02 ? sunV.z : body.moon.z;
+    if (body.sun.alt <= 0.02) {
+      const mlen = Math.hypot(body.moon.x, body.moon.y, body.moon.z) || 1;
+      lightX = body.moon.x / mlen;
+      lightY = Math.max(0.08, body.moon.y / mlen);
+      lightZ = body.moon.z / mlen;
+    }
+    sunDisc.position.copy(sunV).multiplyScalar(210);
+    sunDisc.scale.setScalar(1.7);
+    sunDisc.visible = body.sun.alt > -0.08;
+    (sunDisc.material as THREE.MeshBasicMaterial).color.set(body.sun.alt > 0.15 ? 0xfff6c8 : 0xff9a62);
+    moonDisc.position.set(body.moon.x, body.moon.y, body.moon.z).normalize().multiplyScalar(230);
+    moonDisc.visible = body.moon.alt > -0.05;
+    (moonDisc.material as THREE.MeshBasicMaterial).color.setHSL(0.62, 0.15, 0.78 + 0.15 * Math.sin(((c.date.getUTCDate() % 29) / 29) * Math.PI));
+    moon.intensity = moonUp * 0.55;
+    moon.position.set(body.moon.x, body.moon.y, body.moon.z).normalize().multiplyScalar(70);
+    (stars.material as THREE.PointsMaterial).opacity = night * (weather === "rain" ? 0.15 : 0.95);
+    meteorIn -= frameDt;
+    if (meteorIn <= 0 && night > 0.4) {
+      meteorIn = 14 + Math.random() * 22;
+      meteor.visible = true;
+      meteor.userData.life = 1.3;
+      meteor.userData.x = (Math.random() - 0.5) * 180;
+      meteor.userData.y = 70 + Math.random() * 30;
+      meteor.userData.z = -40 - Math.random() * 80;
+    }
+    if (meteor.visible) {
+      meteor.userData.life -= frameDt;
+      meteor.userData.x += frameDt * 46;
+      meteor.userData.y -= frameDt * 28;
+      meteor.position.set(meteor.userData.x, meteor.userData.y, meteor.userData.z);
+      meteor.lookAt(meteor.position.x + 1, meteor.position.y - 0.6, meteor.position.z);
+      if (meteor.userData.life <= 0) meteor.visible = false;
+    }
+    const camPos = camera.position;
+    flares.forEach((flare, i) => {
+      flare.visible = day > 0.35 && weather !== "rain" && weather !== "snow";
+      flare.position.copy(sunDisc.position).lerp(camPos, 0.18 + i * 0.16);
+      flare.lookAt(camPos);
+      flare.rotation.z += frameDt * (0.4 + i);
+    });
+    clouds.position.x = Math.sin(performance.now() / 7000) * 10;
+    clouds.position.z = Math.cos(performance.now() / 9000) * 4;
+    for (const ribbon of windLines) {
+      const stream = world.streams[ribbon.stream];
+      if (!stream) continue;
+      ribbon.t = (ribbon.t + frameDt * 0.18) % 1;
+      const attr = ribbon.line.geometry.attributes.position as THREE.BufferAttribute;
+      for (let s = 0; s < 6; s++) {
+        const p = streamPoint(stream, (ribbon.t + s * 0.035) % 1);
+        const wobble = Math.sin(performance.now() / 400 + s + ribbon.t * 8) * 0.35;
+        attr.setXYZ(s, p.x + wobble, p.y + 0.4, p.z);
+      }
+      attr.needsUpdate = true;
+    }
     const span = playing && player ? 36 : 90;
     sun.shadow.camera.left = -span;
     sun.shadow.camera.right = span;
@@ -2989,7 +3324,7 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     else sun.target.position.set(0, 4, 0);
     sun.target.updateMatrixWorld();
     const fog = scene.fog as THREE.Fog;
-    fog.color.set(day > 0.35 ? 0x8ec4ee : 0x1a2744);
+    fog.color.set(weather === "rain" ? 0x6e7c88 : weather === "snow" ? 0xd5e0ea : day > 0.35 ? (c.season === "Autumn" ? 0xe0a070 : c.season === "Winter" ? 0xd5e2ee : c.season === "Summer" ? 0xf0c98a : 0x8ec4ee) : 0x1a2744);
     fog.near = weather === "rain" ? 70 : 130;
     fog.far = weather === "rain" ? 220 : 380;
     const tr = trainPose(trainAng);
@@ -3328,6 +3663,30 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
         ctx.font = "600 13px Fredoka, sans-serif";
         ctx.fillText(slot.speech, sx, sy - 28);
       }
+      if (slot.mood) {
+        const moodColor =
+          slot.mood === "angry" ? "#c41828" : slot.mood === "depressed" ? "#6a7894" : slot.mood === "cry" ? "#6aa0d8" : slot.mood === "wave" || slot.mood === "happy" ? "#7dce4a" : slot.mood === "exclaim" ? "#f0c14a" : "#f4f1e4";
+        ctx.save();
+        ctx.translate(sx, sy - 46);
+        ctx.fillStyle = moodColor;
+        ctx.beginPath();
+        ctx.moveTo(0, -10);
+        ctx.lineTo(7, 0);
+        ctx.lineTo(0, 10);
+        ctx.lineTo(-7, 0);
+        ctx.closePath();
+        ctx.fill();
+        if (slot.mood === "angry") {
+          ctx.strokeStyle = "#3a0610";
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.moveTo(-3, -2);
+          ctx.lineTo(0, 3);
+          ctx.lineTo(3, -1);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
     }
     if (!spectate) drawWeaponWheel(ctx, w, h);
     drawMini(ctx, w, h);
@@ -3656,6 +4015,7 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       console: false,
       menu: false,
       spectate: false,
+      heat: 0,
     };
   }
 
@@ -3761,6 +4121,7 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       console: showConsole,
       menu,
       spectate,
+      heat: player?.heatSick ? heatLeft : 0,
     };
     for (const s of subs) s();
   }
@@ -3769,8 +4130,18 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     quality = q;
     const pr = q === "low" ? 0.8 : q === "ultra" ? Math.min(1.75, window.devicePixelRatio || 1) : q === "high" ? Math.min(1.6, window.devicePixelRatio || 1) : 1;
     renderer.setPixelRatio(pr);
-    renderer.shadowMap.enabled = false;
-    sun.castShadow = false;
+    const shadows = q === "high" || q === "ultra";
+    renderer.shadowMap.enabled = shadows;
+    sun.castShadow = shadows;
+    sun.shadow.mapSize.set(q === "ultra" ? 2048 : 1024, q === "ultra" ? 2048 : 1024);
+    if (sun.shadow.map) {
+      sun.shadow.map.dispose();
+      sun.shadow.map = null;
+    }
+    ground.castShadow = false;
+    ground.receiveShadow = shadows;
+    staticBoxes.castShadow = shadows;
+    staticBoxes.receiveShadow = shadows;
     pilots.setUltra(q === "ultra");
     mutants.setUltra(q === "ultra");
     flowerM.count = q === "low" ? Math.min(40, world.flowers.length) : world.flowers.length;

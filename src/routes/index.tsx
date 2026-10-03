@@ -311,6 +311,7 @@ function Home() {
               <div className="hero-copy">
                 <p className="kicker">{PUBLIC_SITE}</p>
                 <h1>Mount Dew</h1>
+                <video className="launch" src="/game/launch.mp4" autoPlay muted loop playsInline controls />
                 <p className="lede">One desert. Three flags. A hill that pays if you hold it. The match stays up, and you can drop in from this page.</p>
                 <div className="posters">
                   <img className="cover" src="/og.jpg" alt="Mount Dew app cover" />
@@ -487,6 +488,12 @@ function Home() {
           </div>
           <div className="feed">
             {hud.banner ? <p className="banner">{hud.banner}</p> : null}
+            {hud.heat > 0 ? (
+              <div className="heat">
+                HEATSTROKE
+                <b>{Math.ceil(hud.heat)}</b>
+              </div>
+            ) : null}
             {hud.feed.map((line) => (
               <p key={line.id} style={{ opacity: Math.max(0.35, 1 - (hud.now - line.at) / 6000) }}>
                 {line.text}

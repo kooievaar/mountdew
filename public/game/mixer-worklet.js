@@ -12,6 +12,15 @@ class DewMixer extends AudioWorkletProcessor {
     for (let i = 0; i < 448; i++) {
       this.voices.push({ on: 0, listed: 0, buf: 0, pos: 0, gain: 0, rate: 1, start: 0, lane: 0, gl: 1, gr: 1, loop: 0 });
     }
+    this.aL = new Float32Array(256);
+    this.aR = new Float32Array(256);
+    this.oL = new Float32Array(256);
+    this.oR = new Float32Array(256);
+    this.delayL = new Float32Array(16384);
+    this.delayR = new Float32Array(16384);
+    this.dPos = 0;
+    this.lpL = 0;
+    this.lpR = 0;
     this.port.onmessage = (e) => this.onMsg(e.data);
   }
 
@@ -19,6 +28,17 @@ class DewMixer extends AudioWorkletProcessor {
     if (!data) return;
     if (data.cmd === "bufs") {
       this.bufs = data.bufs || [];
+      return;
+    }
+    if (data.cmd === "addbuf") {
+      this.bufs[data.id] = data.buf;
+      return;
+    }
+    if (data.cmd === "gain") {
+      for (let i = 0; i < this.voices.length; i++) {
+        const v = this.voices[i];
+        if (v.loop && v.buf === data.id) v.gain = data.gain;
+      }
       return;
     }
     const items = data.items || [];
@@ -31,21 +51,14 @@ class DewMixer extends AudioWorkletProcessor {
     const from = lane === 2 ? 0 : lane === 1 ? 16 : 96;
     const to = lane === 2 ? 16 : lane === 1 ? 96 : 448;
     let free = null;
-    let old = null;
-    let oldT = 1e18;
     for (let i = from; i < to; i++) {
-      const v = this.voices[i];
-      if (!v.on) {
-        free = v;
+      if (!this.voices[i].on) {
+        free = this.voices[i];
         break;
       }
-      if (v.start < oldT) {
-        oldT = v.start;
-        old = v;
-      }
     }
-    const slot = free || old;
-    if (!slot) return;
+    if (!free) return;
+    const slot = free;
     const pan = it.pan || 0;
     slot.on = 1;
     slot.buf = it.id;
@@ -73,18 +86,24 @@ class DewMixer extends AudioWorkletProcessor {
     if (!outL) return true;
     const outR = outputs[0][1] || null;
     const n = outL.length;
-    if (this.pL.length < n) {
-      this.pL = new Float32Array(n);
-      this.pR = new Float32Array(n);
+    if (this.aL.length < n) {
+      this.aL = new Float32Array(n);
+      this.aR = new Float32Array(n);
+      this.oL = new Float32Array(n);
+      this.oR = new Float32Array(n);
       this.wL = new Float32Array(n);
       this.wR = new Float32Array(n);
     }
-    const pL = this.pL;
-    const pR = this.pR;
+    const aL = this.aL;
+    const aR = this.aR;
+    const oL = this.oL;
+    const oR = this.oR;
     const wL = this.wL;
     const wR = this.wR;
-    pL.fill(0, 0, n);
-    pR.fill(0, 0, n);
+    aL.fill(0, 0, n);
+    aR.fill(0, 0, n);
+    oL.fill(0, 0, n);
+    oR.fill(0, 0, n);
     wL.fill(0, 0, n);
     wR.fill(0, 0, n);
     const clock = this.clock;
@@ -111,8 +130,8 @@ class DewMixer extends AudioWorkletProcessor {
       const gr = v.gr;
       const len = data.length;
       const loop = v.loop;
-      const L = v.lane ? pL : wL;
-      const R = v.lane ? pR : wR;
+      const L = v.lane === 2 ? oL : v.lane === 1 ? aL : wL;
+      const R = v.lane === 2 ? oR : v.lane === 1 ? aR : wR;
       for (let i = 0; i < n; i++) {
         if (clock + i < start) continue;
         let idx = pos | 0;
@@ -133,16 +152,39 @@ class DewMixer extends AudioWorkletProcessor {
       }
       v.pos = pos;
     }
+    const mask = this.delayL.length - 1;
+    const tapA = Math.floor(sampleRate * 0.17);
+    const tapB = Math.floor(sampleRate * 0.31);
+    let dPos = this.dPos;
+    let lpL = this.lpL;
+    let lpR = this.lpR;
+    let ann = 0;
+    for (let i = 0; i < n; i++) ann = Math.max(ann, Math.abs(aL[i]), Math.abs(aR[i]));
+    const duck = ann > 0.015 ? 0.42 : 1;
     for (let i = 0; i < n; i++) {
-      const wl = wL[i] / (1 + Math.abs(wL[i]));
-      const wr = wR[i] / (1 + Math.abs(wR[i]));
-      let l = pL[i] * 0.92 + wl * 0.5;
-      let r = pR[i] * 0.92 + wr * 0.5;
-      l /= 1 + Math.abs(l) * 0.15;
-      r /= 1 + Math.abs(r) * 0.15;
+      const iA = (dPos - tapA) & mask;
+      const iB = (dPos - tapB) & mask;
+      const echoL = this.delayL[iA] * 0.46 + this.delayL[iB] * 0.24;
+      const echoR = this.delayR[iA] * 0.46 + this.delayR[iB] * 0.24;
+      lpL += (echoL - lpL) * 0.28;
+      lpR += (echoR - lpR) * 0.28;
+      const voiceL = aL[i] * 1.25 + lpL;
+      const voiceR = aR[i] * 1.25 + lpR;
+      const wl = (wL[i] / (1 + Math.abs(wL[i]))) * duck;
+      const wr = (wR[i] / (1 + Math.abs(wR[i]))) * duck;
+      let l = oL[i] * 0.95 + voiceL + wl * 0.55;
+      let r = oR[i] * 0.95 + voiceR + wr * 0.55;
+      l /= 1 + Math.abs(l) * 0.12;
+      r /= 1 + Math.abs(r) * 0.12;
+      this.delayL[dPos] = aL[i] * 0.7 + lpL * 0.32;
+      this.delayR[dPos] = aR[i] * 0.7 + lpR * 0.32;
+      dPos = (dPos + 1) & mask;
       outL[i] = outR ? l : (l + r) * 0.5;
       if (outR) outR[i] = r;
     }
+    this.dPos = dPos;
+    this.lpL = lpL;
+    this.lpR = lpR;
     if (dead > 32) {
       const keep = [];
       for (let k = 0; k < active.length; k++) {

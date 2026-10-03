@@ -27,6 +27,16 @@ export type FigureSpec = {
   halo: boolean;
   gun: boolean;
   id: number;
+  mood: string;
+  mouth: number;
+  veins: number;
+  look: number;
+  angry: boolean;
+  sunX: number;
+  sunY: number;
+  sunZ: number;
+  lean: number;
+  bank: number;
 };
 
 const NAMES = ["hips", "spine", "chest", "neck", "head", "armL", "foreL", "handL", "armR", "foreR", "handR", "thighL", "shinL", "footL", "thighR", "shinR", "footR", "hair", "skirt"] as const;
@@ -41,7 +51,7 @@ const grad = (() => {
   return tex;
 })();
 
-const solidMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+const solidMat = new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 22, specular: new THREE.Color(0x666666) });
 const pencilMat = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: grad });
 
 function bone(): THREE.Bone {
@@ -369,6 +379,21 @@ export function createFigures(scene: THREE.Scene, count: number, mutant: boolean
     const gun = gunMesh();
     gun.position.set(0, -0.06, -0.16);
     rig.handR.add(gun);
+    const mouthMat = new THREE.MeshBasicMaterial({ color: 0x4a1020 });
+    const mouthBit = new THREE.Mesh(new THREE.CircleGeometry(0.035, 8), mouthMat);
+    const mouthOpen = new THREE.Mesh(new THREE.CircleGeometry(0.055, 8), mouthMat);
+    mouthBit.position.set(0, -0.02, 0.11);
+    mouthOpen.position.set(0, -0.035, 0.115);
+    mouthOpen.scale.set(1, 1.35, 1);
+    rig.head.add(mouthBit, mouthOpen);
+    const veins = [0, 1, 2, 3].map((i) => {
+      const vein = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.1, 0.008), new THREE.MeshBasicMaterial({ color: 0x8a1830 }));
+      vein.position.set((i - 1.5) * 0.028, 0.05, 0.1);
+      vein.rotation.z = (i - 1.5) * 0.45;
+      vein.visible = false;
+      rig.head.add(vein);
+      return vein;
+    });
     const shadow = pencilShadow();
     scene.add(mesh, shadow);
     return {
@@ -378,6 +403,9 @@ export function createFigures(scene: THREE.Scene, count: number, mutant: boolean
       wingR,
       halo,
       gun,
+      mouthBit,
+      mouthOpen,
+      veins,
       shadow,
       cur: new Float32Array(NB * 3),
       vel: new Float32Array(NB * 3),
@@ -386,6 +414,9 @@ export function createFigures(scene: THREE.Scene, count: number, mutant: boolean
       key: "",
       px: 0,
       pz: 0,
+      pyaw: 0,
+      leanP: 0,
+      leanR: 0,
     };
   });
   let ultra = false;
@@ -460,6 +491,30 @@ export function createFigures(scene: THREE.Scene, count: number, mutant: boolean
     add("armR", 0.4, -0.3, -0.4, down);
     add("thighL", 0.35, 0, 0.2, down);
     add("thighR", 0.2, 0, -0.2, down);
+    add("spine", -spec.lean * 0.45, 0, -spec.bank * 0.55, 1);
+    add("chest", -spec.lean * 0.2, 0, -spec.bank * 0.25, 1);
+    add("head", -spec.lean * 0.35, 0, -spec.bank * 0.15, 1);
+    if (spec.mood === "wave") {
+      add("armR", -0.15, 0, -2.55, 1);
+      add("foreR", Math.sin(phase * 7) * 0.55, 0, -0.35, 1);
+      add("head", 0, spec.look, 0, 1);
+    } else if (spec.mood === "angry") {
+      add("armR", -0.05, 0, -2.35, 1);
+      add("foreR", 0, 0, -1.25, 1);
+      add("head", 0.18, spec.look, 0.22, 1);
+      add("chest", 0.12, 0, 0, 1);
+    } else if (spec.mood === "depressed" || spec.mood === "cry") {
+      add("spine", 0.55, 0, 0, 1);
+      add("head", 0.7, spec.look * 0.25, 0, 1);
+      add("armL", 0.4, 0.1, 0.25, 1);
+      add("armR", 0.4, -0.1, -0.25, 1);
+    } else if (spec.mood === "talk" || spec.mood === "exclaim" || spec.mood === "happy") {
+      add("head", 0, spec.look, 0, 1);
+      add("chest", -0.08, 0, 0, 1);
+    } else if (spec.look) {
+      add("head", 0, spec.look, 0, 1);
+      add("neck", 0, spec.look * 0.4, 0, 1);
+    }
     if (mutant) add("spine", 0.35, 0, 0, 1);
     void idle;
   }
@@ -544,15 +599,43 @@ export function createFigures(scene: THREE.Scene, count: number, mutant: boolean
       (slot.wingR.material as THREE.MeshLambertMaterial).color.setHex(spec.wingColor);
       slot.halo.visible = spec.halo;
       slot.gun.visible = spec.gun;
+      const talking = spec.mouth >= 0;
+      slot.mouthBit.visible = talking && spec.mouth === 0;
+      slot.mouthOpen.visible = talking && spec.mouth === 1;
+      slot.veins.forEach((vein, vi) => {
+        vein.visible = vi < spec.veins;
+      });
       slot.mesh.visible = true;
-      slot.mesh.position.set(spec.x, spec.y, spec.z);
+      let turn = spec.yaw - slot.pyaw;
+      while (turn > Math.PI) turn -= Math.PI * 2;
+      while (turn < -Math.PI) turn += Math.PI * 2;
+      slot.pyaw = spec.yaw;
+      const turnLean = THREE.MathUtils.clamp((-turn / Math.max(0.008, spec.dt)) * 0.045, -0.4, 0.4);
+      const k = 1 - Math.exp(-9 * Math.min(0.05, spec.dt));
+      slot.leanP += (spec.lean - slot.leanP) * k;
+      slot.leanR += (spec.bank + turnLean - slot.leanR) * k;
+      const bob = spec.grounded && !spec.down ? Math.abs(Math.sin(slot.phase * 2)) * 0.045 * THREE.MathUtils.clamp(speed / 6, 0, 1) : 0;
+      slot.mesh.position.set(spec.x, spec.y + bob, spec.z);
       slot.mesh.rotation.order = "YXZ";
-      slot.mesh.rotation.set(ultra ? 0 : spec.down ? spec.fall * 1.15 : 0, spec.yaw, 0);
+      const flop = !ultra && spec.down ? spec.fall * 1.15 : 0;
+      slot.mesh.rotation.set(flop + slot.leanP, spec.yaw, slot.leanR);
       slot.mesh.scale.set(spec.scale, spec.scale * spec.squash, spec.scale);
+      slot.mesh.castShadow = ultra;
       slot.mesh.updateMatrixWorld(true);
-      slot.shadow.visible = ultra && !spec.down;
-      slot.shadow.position.set(spec.x, spec.y + 0.04, spec.z);
-      slot.shadow.scale.setScalar(0.9 + spec.scale);
+      slot.shadow.visible = !spec.down;
+      if (ultra) {
+        const lit = Math.max(0.05, spec.sunY);
+        const len = THREE.MathUtils.clamp(0.42 / lit, 0.35, 3.4);
+        slot.shadow.position.set(spec.x - spec.sunX * len, spec.y + 0.035, spec.z - spec.sunZ * len);
+        slot.shadow.scale.set(0.45 + len * 0.22, 1, 0.32 + len * 0.5);
+        slot.shadow.rotation.y = Math.atan2(spec.sunX, spec.sunZ);
+        (slot.shadow.material as THREE.MeshBasicMaterial).opacity = 0.45;
+      } else {
+        slot.shadow.position.set(spec.x, spec.y + 0.03, spec.z);
+        slot.shadow.scale.set(0.7, 1, 0.45);
+        slot.shadow.rotation.y = spec.yaw;
+        (slot.shadow.material as THREE.MeshBasicMaterial).opacity = 0.28;
+      }
     },
   };
 }
