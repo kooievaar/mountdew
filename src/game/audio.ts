@@ -46,13 +46,9 @@ export function createAudio(): AudioBus {
   let stepAcc = 0;
   let laughAcc = 0;
   const ear = { x: 0, y: 8, z: 0 };
-  let pilotVoices = 0;
-  let giggleOn = 0;
-  let shotVoices = 0;
-  let boomVoices = 0;
+  let mixOn = 0;
+  const MAX_MIX = 400;
   let introDone = false;
-  let boothUntil = 0;
-  const boothQueue: { text: string; form: "booth" | "color" }[] = [];
 
   function ac() {
     if (!ctx) {
@@ -61,15 +57,22 @@ export function createAudio(): AudioBus {
       master = ctx.createGain();
       master.gain.value = vol;
       master.connect(ctx.destination);
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -16;
+      comp.knee.value = 18;
+      comp.ratio.value = 8;
+      comp.attack.value = 0.004;
+      comp.release.value = 0.22;
+      comp.connect(master);
       sfxBus = ctx.createGain();
       sfxBus.gain.value = 0.8;
-      sfxBus.connect(master);
+      sfxBus.connect(comp);
       voiceBus = ctx.createGain();
       voiceBus.gain.value = 1;
-      voiceBus.connect(master);
+      voiceBus.connect(comp);
       boothBus = ctx.createGain();
       boothBus.gain.value = 1;
-      boothBus.connect(master);
+      boothBus.connect(comp);
       const len = ctx.sampleRate * 2;
       const buf = ctx.createBuffer(1, len, ctx.sampleRate);
       const data = buf.getChannelData(0);
@@ -213,24 +216,25 @@ export function createAudio(): AudioBus {
     return Math.max(280, (n + words.length * 0.2) * gap * 1000 + 80);
   }
 
-  function playBooth(text: string, form: "booth" | "color") {
-    const g = form === "booth" ? Math.max(0.75, boothGain()) : Math.max(0.4, boothGain());
-    const pitch = form === "booth" ? 210 : 320;
-    const ms = talk(text, pitch, (form === "booth" ? 0.14 : 0.1) * g, form);
-    boothUntil = performance.now() + ms + 180;
-    window.setTimeout(flushBooth, ms + 180);
+  function holdMix(ms: number) {
+    if (mixOn >= MAX_MIX) return false;
+    mixOn++;
+    window.setTimeout(() => {
+      mixOn = Math.max(0, mixOn - 1);
+    }, Math.max(40, ms));
+    return true;
   }
 
-  function flushBooth() {
-    if (performance.now() < boothUntil) return;
-    const next = boothQueue.shift();
-    if (next) playBooth(next.text, next.form);
+  function playBooth(text: string, form: "booth" | "color") {
+    if (!holdMix(1600)) return;
+    const g = form === "booth" ? Math.max(0.75, boothGain()) : Math.max(0.4, boothGain());
+    const pitch = form === "booth" ? 210 : 320;
+    talk(text, pitch, (form === "booth" ? 0.14 : 0.1) * g, form);
   }
 
   function queueBooth(text: string, form: "booth" | "color") {
-    if (!text) return;
-    if (performance.now() >= boothUntil && boothQueue.length === 0) playBooth(text, form);
-    else if (boothQueue.length < 8) boothQueue.push({ text, form });
+    if (!text || mixOn >= MAX_MIX) return;
+    playBooth(text, form);
   }
 
   function announceLine(text: string) {
@@ -269,12 +273,7 @@ export function createAudio(): AudioBus {
     },
     shotAt(x: number, y: number, z: number, kind: string, self: boolean) {
       const g = self ? Math.max(0.9, distGain(x, y, z, 36)) : distGain(x, y, z, 36);
-      if (g < 0.05) return;
-      if (!self && shotVoices >= 8) return;
-      shotVoices++;
-      window.setTimeout(() => {
-        shotVoices = Math.max(0, shotVoices - 1);
-      }, 90);
+      if (g < 0.02 || !holdMix(120)) return;
       shotBody(kind, 0.1 * g);
     },
     ding() {
@@ -287,11 +286,7 @@ export function createAudio(): AudioBus {
     },
     boomAt(x: number, y: number, z: number) {
       const g = distGain(x, y, z, 40);
-      if (g < 0.05 || boomVoices >= 2) return;
-      boomVoices++;
-      window.setTimeout(() => {
-        boomVoices = Math.max(0, boomVoices - 1);
-      }, 280);
+      if (g < 0.02 || !holdMix(320)) return;
       noise(0.28, 0.12 * g, 140);
       tone(90, 0.22, "sine", 0.08 * g, -40);
     },
@@ -301,33 +296,25 @@ export function createAudio(): AudioBus {
     },
     voiceAt(x: number, y: number, z: number, pitch: number, kind: string, line: string, self: boolean) {
       const g = self ? 1 : distGain(x, y, z, 24);
-      if (g < 0.08) return;
-      if (!self && pilotVoices >= 4) return;
-      pilotVoices++;
+      if (g < 0.02 || !holdMix(900)) return;
       const phrase = line || kind || "hey";
       const ms = talk(phrase, Math.max(90, pitch), 0.16 * g, "pilot");
-      window.setTimeout(() => {
-        pilotVoices = Math.max(0, pilotVoices - 1);
-      }, ms);
+      void ms;
     },
     help(pitch: number) {
       sequence([pitch, pitch * 0.8, pitch], 0.14, "sine", 0.07);
     },
     helpAt(x: number, y: number, z: number, pitch: number, self: boolean) {
       const g = self ? 1 : distGain(x, y, z, 22);
-      if (g < 0.08 || (!self && pilotVoices >= 4)) return;
-      pilotVoices++;
-      const ms = talk("help", Math.max(90, pitch), 0.12 * g, "pilot");
-      window.setTimeout(() => {
-        pilotVoices = Math.max(0, pilotVoices - 1);
-      }, ms);
+      if (g < 0.02 || !holdMix(700)) return;
+      talk("help", Math.max(90, pitch), 0.12 * g, "pilot");
     },
     splash() {
       noise(0.18, 0.08, 900);
     },
     splashAt(x: number, y: number, z: number) {
       const g = distGain(x, y, z, 22);
-      if (g < 0.05) return;
+      if (g < 0.02 || !holdMix(200)) return;
       noise(0.18, 0.08 * g, 900);
     },
     laugh() {
@@ -335,17 +322,13 @@ export function createAudio(): AudioBus {
     },
     laughAt(x: number, y: number, z: number) {
       const g = distGain(x, y, z, 22);
-      if (g < 0.05) return;
+      if (g < 0.02 || !holdMix(200)) return;
       tone(500 + Math.random() * 200, 0.1, "square", 0.045 * g, 80);
     },
     giggle(x: number, y: number, z: number) {
       const g = distGain(x, y, z, 26);
-      if (g < 0.05 || giggleOn >= 2) return;
-      giggleOn++;
-      const ms = talk("Hahaha Hihihi Hahaha", 620, 0.18 * g, "pilot");
-      window.setTimeout(() => {
-        giggleOn = Math.max(0, giggleOn - 1);
-      }, ms);
+      if (g < 0.02 || !holdMix(1400)) return;
+      talk("Hahaha Hihihi Hahaha", 620, 0.18 * g, "pilot");
     },
     train() {
       noise(0.16, 0.05, 120);
@@ -353,7 +336,7 @@ export function createAudio(): AudioBus {
     },
     trainAt(x: number, y: number, z: number) {
       const g = distGain(x, y, z, 46);
-      if (g < 0.05) return;
+      if (g < 0.02 || !holdMix(200)) return;
       noise(0.16, 0.05 * g, 120);
       tone(440, 0.2, "triangle", 0.035 * g);
     },
