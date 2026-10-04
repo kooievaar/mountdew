@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type FormEvent, type PointerEvent } from "react";
-import { Eye, List, Map, Maximize2, Settings, Terminal, X } from "lucide-react";
+import { Eye, List, Map, Maximize2, Settings, Terminal, Volume2, X } from "lucide-react";
 import { CHARACTERS, TEAMS } from "@/game/content";
 import type { GameHandle, HudState, Quality } from "@/game/engine";
 import { bindRelay, connectRelay, onRelayAfk, onRelayAnnounce, onRelayChat, onRelayPings, onRelayRoster, relayBound, sendRelayChat } from "@/game/relay-client";
@@ -669,7 +669,7 @@ function Home() {
         </div>
       ) : null}
       {play ? (
-        <div className={hud.map ? "hud map-open" : "hud"}>
+        <div className={hud.map ? "hud map-open" : hud.menu ? "hud menu-open" : "hud"}>
           <div className="topbar">
             <div className="chip scores">
               {hud.teams.map((t) => (
@@ -714,19 +714,22 @@ function Home() {
               </div>
             </div>
             <div className="pad interactive">
-              <button className="icon-btn" type="button" aria-label="Scoreboard" onClick={() => gameRef.current?.toggleScore()}>
+              <button className="icon-btn" type="button" aria-label="Scoreboard" onPointerDown={(e) => { e.stopPropagation(); document.exitPointerLock(); gameRef.current?.toggleScore(); }}>
                 <List size={18} />
               </button>
-              <button className="icon-btn" type="button" aria-label="Map" onClick={() => gameRef.current?.toggleMap()}>
+              <button className="icon-btn" type="button" aria-label="Map" onPointerDown={(e) => { e.stopPropagation(); document.exitPointerLock(); gameRef.current?.toggleMap(); }}>
                 <Map size={18} />
               </button>
-              <button className="icon-btn" type="button" aria-label="Console" onClick={() => gameRef.current?.toggleConsole()}>
+              <button className="icon-btn" type="button" aria-label="Console" onPointerDown={(e) => { e.stopPropagation(); document.exitPointerLock(); gameRef.current?.toggleConsole(); }}>
                 <Terminal size={18} />
               </button>
-              <button className="icon-btn" type="button" aria-label="Spectate" onClick={() => gameRef.current?.toggleSpectate()}>
+              <button className="icon-btn" type="button" aria-label="Sound" onPointerDown={(e) => { e.stopPropagation(); document.exitPointerLock(); setTab("sound"); gameRef.current?.setMenu(true); }}>
+                <Volume2 size={18} />
+              </button>
+              <button className="icon-btn" type="button" aria-label="Spectate" onPointerDown={(e) => { e.stopPropagation(); document.exitPointerLock(); gameRef.current?.toggleSpectate(); }}>
                 <Eye size={18} />
               </button>
-              <button className="icon-btn" type="button" aria-label="Options" onClick={() => gameRef.current?.setMenu(true)}>
+              <button className="icon-btn" type="button" aria-label="Options" onPointerDown={(e) => { e.stopPropagation(); document.exitPointerLock(); gameRef.current?.setMenu(true); }}>
                 <Settings size={18} />
               </button>
             </div>
@@ -820,12 +823,12 @@ function Home() {
                   <X size={18} />
                 </button>
               </div>
-              <div className="teams">
-                <button className={tab === "graphics" ? "choice on" : "choice"} type="button" onClick={() => setTab("graphics")}>
-                  Graphics
-                </button>
+              <div className="tabs">
                 <button className={tab === "sound" ? "choice on" : "choice"} type="button" onClick={() => setTab("sound")}>
                   Sound
+                </button>
+                <button className={tab === "graphics" ? "choice on" : "choice"} type="button" onClick={() => setTab("graphics")}>
+                  Graphics
                 </button>
                 <button className={tab === "help" ? "choice on" : "choice"} type="button" onClick={() => setTab("help")}>
                   Help

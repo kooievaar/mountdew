@@ -3580,6 +3580,7 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       drawMap(ctx, w, h);
       return;
     }
+    if (menu || showScore || showConsole) return;
     const cx = w / 2;
     const cy = h / 2;
     ctx.strokeStyle = "rgba(244,241,228,0.9)";
@@ -3705,7 +3706,7 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     if (Math.abs(delta) < 0.01) wheelShown = sel;
     gunKick *= 0.86;
     const cx = w / 2;
-    const cy = h - 168;
+    const cy = Math.max(120, h - 230);
     const t = performance.now() / 1000;
     for (let i = 0; i < n; i++) {
       let off = i - wheelShown;
@@ -3869,9 +3870,9 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
 
   function drawMini(ctx: CanvasRenderingContext2D, w: number, h: number) {
     if (!player) return;
-    const R = Math.min(68, w * 0.11);
-    const cx = w - 18 - R;
-    const cy = Math.min(h * 0.36, h - 240);
+    const R = Math.min(64, w * 0.09);
+    const cx = w - 20 - R;
+    const cy = Math.min(108 + R, h - 280);
     ctx.save();
     ctx.beginPath();
     ctx.arc(cx, cy, R, 0, Math.PI * 2);
@@ -4164,6 +4165,12 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       }
       tapAt[e.code] = now;
     }
+    if (e.code === "Escape") {
+      menu = !menu;
+      document.exitPointerLock();
+      emit();
+      return;
+    }
     if (!playing || menu) return;
     if (e.code === "Tab") {
       showScore = !showScore;
@@ -4176,10 +4183,6 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     } else if (e.code === "Backquote") {
       showConsole = !showConsole;
       if (showConsole) document.exitPointerLock();
-      emit();
-    } else if (e.code === "Escape") {
-      menu = !menu;
-      document.exitPointerLock();
       emit();
     } else if (e.code === "KeyV") {
       toggleSpectate();
