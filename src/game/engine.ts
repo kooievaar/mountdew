@@ -908,7 +908,7 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
       a.moodT = a.speechT;
     }
     const ch = CHAR_BY_ID[a.charId];
-    audio.voiceAt(a.x, a.y + 1.2, a.z, ch?.voice || 440, key, a.speech, a === player);
+    audio.voiceAt(a.x, a.y + 1.2, a.z, ch?.voice || 440, key, a.speech, a === player, a.charId);
   }
 
   function pose(mesh: THREE.InstancedMesh, i: number, x: number, y: number, z: number, rx: number, ry: number, rz: number, sx: number, sy: number, sz: number) {
@@ -4415,6 +4415,21 @@ export function createGame(view: HTMLCanvasElement, overlay: HTMLCanvasElement, 
     setVolume(v: number) {
       volume = v;
       audio.setVolume(v);
+    },
+    setDither(next: Parameters<typeof audio.setDither>[0]) {
+      audio.setDither(next);
+    },
+    setStudio(next: Parameters<typeof audio.setStudio>[0]) {
+      audio.setStudio(next);
+    },
+    getStudioViz() {
+      return audio.getStudioViz();
+    },
+    setMix(next: Parameters<typeof audio.setMix>[0]) {
+      audio.setMix(next);
+    },
+    getMeters() {
+      return audio.getMeters();
     },
     setSens(v: number) {
       sens = v;

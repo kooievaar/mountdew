@@ -20,6 +20,51 @@ const SERVERS = [
 ] as const;
 const SERVER_LABEL = ["Primary", "Fallback", "Third"];
 
+function ditherPeak(samples: Float32Array) {
+  let peak = 1e-8;
+  for (let i = 0; i < samples.length; i++) peak = Math.max(peak, Math.abs(samples[i]!));
+  return peak;
+}
+
+function VolumeKnob({ db, onChange }: { db: number; onChange: (db: number) => void }) {
+  const drag = useRef<{ y: number; db: number } | null>(null);
+  const angle = -140 + ((db + 60) / 66) * 280;
+  return (
+    <div className="knob-wrap">
+      <button
+        type="button"
+        className="knob"
+        role="slider"
+        aria-label="Master volume"
+        aria-valuemin={-60}
+        aria-valuemax={6}
+        aria-valuenow={Math.round(db * 10) / 10}
+        style={{ transform: `rotate(${angle}deg)` }}
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          drag.current = { y: e.clientY, db };
+        }}
+        onPointerMove={(e) => {
+          if (!drag.current) return;
+          const next = drag.current.db + (drag.current.y - e.clientY) * 0.18;
+          onChange(Math.max(-60, Math.min(6, Math.round(next * 10) / 10)));
+        }}
+        onPointerUp={() => {
+          drag.current = null;
+        }}
+        onDoubleClick={() => onChange(-3.1)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowUp" || e.key === "ArrowRight") onChange(Math.min(6, Math.round((db + 0.5) * 10) / 10));
+          if (e.key === "ArrowDown" || e.key === "ArrowLeft") onChange(Math.max(-60, Math.round((db - 0.5) * 10) / 10));
+        }}
+      >
+        <span />
+      </button>
+      <span>Volume</span>
+    </div>
+  );
+}
+
 const ASCII = ` __  __  ___  _   _ _   _ _____
 |  \\/  |/ _ \\| | | | \\ | |_   _|
 | |\\/| | | | | | | |  \\| | | |
@@ -43,13 +88,168 @@ function Home() {
   const [phase, setPhase] = useState<"login" | "play">("login");
   const [board, setBoard] = useState<BoardRow[]>([]);
   const [hud, setHud] = useState<HudState | null>(null);
-  const [tab, setTab] = useState<"help" | "about" | "graphics">("help");
+  const [tab, setTab] = useState<"help" | "about" | "graphics" | "sound">("help");
   const [chat, setChat] = useState<{ id: number; nick: string; team: number; text: string }[]>([]);
   const [draft, setDraft] = useState("");
   const touch = useRef({ x: 0, y: 0, fire: false, jump: false, act: false, cycle: false, dash: false });
   const chatLogRef = useRef<HTMLDivElement>(null);
+  const specRef = useRef<HTMLCanvasElement>(null);
+  const scopeRef = useRef<HTMLCanvasElement>(null);
+  const meterRefs = useRef<(HTMLElement | null)[]>([]);
+  const holdRefs = useRef<(HTMLElement | null)[]>([]);
+  const eqRead = useRef<(HTMLElement | null)[]>([]);
+  const [strips, setStrips] = useState(
+    [0, 1, 2].map(() => ({ fader: 0, pan: 0, trim: 0, hpf: 20, aux: 0, pre: false, mute: false, solo: false, pfl: false, pol: false })),
+  );
+  const [auxReturn, setAuxReturn] = useState(0);
+  const [duck, setDuck] = useState(0.42);
+  const [masterDb, setMasterDb] = useState(-3.1);
+  const [masterMute, setMasterMute] = useState(false);
+  const [eq, setEq] = useState({ hz: 100, low: 0, lowMid: 0, mid: 0, highMid: 0, high: 0 });
+  const [eqOn, setEqOn] = useState(true);
+  const [desk, setDesk] = useState<"mix" | "tone" | "out">("mix");
+
+  function setMaster(db: number) {
+    setMasterDb(db);
+    if (!masterMute) gameRef.current?.setVolume(Math.max(0, Math.min(1, 10 ** (db / 20))));
+  }
+
+  function toggleMasterMute() {
+    const next = !masterMute;
+    setMasterMute(next);
+    gameRef.current?.setVolume(next ? 0 : Math.max(0, Math.min(1, 10 ** (masterDb / 20))));
+  }
+
+  function setEqBand(patch: Partial<typeof eq>) {
+    const next = { ...eq, ...patch };
+    setEq(next);
+    gameRef.current?.setStudio({
+      eq: [{ f: next.hz, g: next.low }, { g: next.lowMid }, { g: next.mid }, { g: next.highMid }, { g: next.high }],
+      eqOn,
+    });
+  }
+
+  function toggleEq() {
+    const next = !eqOn;
+    setEqOn(next);
+    gameRef.current?.setStudio({ eqOn: next });
+  }
+
+  function sendMix(next = strips, aux = auxReturn, duckTo = duck) {
+    const lin = (db: number) => (db <= -60 ? 0 : 10 ** (db / 20));
+    gameRef.current?.setMix({
+      ch: next.map((s) => ({
+        fader: lin(s.fader),
+        trim: lin(s.trim),
+        pan: s.pan,
+        mute: s.mute,
+        solo: s.solo,
+        pfl: s.pfl,
+        pol: s.pol ? -1 : 1,
+        hpf: s.hpf < 25 ? 0 : s.hpf,
+        aux: s.aux,
+        pre: s.pre,
+      })),
+      auxReturn: aux,
+      duck: duckTo,
+    });
+  }
+
+  function patchStrip(index: number, patch: Partial<(typeof strips)[number]>) {
+    const next = strips.map((s, i) => (i === index ? { ...s, ...patch } : s));
+    setStrips(next);
+    sendMix(next);
+  }
   const chatInputRef = useRef<HTMLInputElement>(null);
   const chatSeq = useRef(1);
+
+  useEffect(() => {
+    if (tab !== "sound" || !hud?.menu) return;
+    let raf = 0;
+    const loop = () => {
+      raf = requestAnimationFrame(loop);
+      const viz = gameRef.current?.getStudioViz();
+      const meters = gameRef.current?.getMeters();
+      if (viz?.centers) {
+        viz.centers.forEach((db, i) => {
+          const el = eqRead.current[i];
+          if (el) el.textContent = `${db >= 0 ? "+" : ""}${db.toFixed(1)} heard`;
+        });
+      }
+      if (meters) {
+        for (let i = 0; i < 4; i++) {
+          const bar = meterRefs.current[i];
+          const hold = holdRefs.current[i];
+          if (bar) bar.style.height = `${Math.min(100, meters.peak[i]! * 140)}%`;
+          if (hold) hold.style.bottom = `${Math.min(98, meters.hold[i]! * 140)}%`;
+        }
+      }
+      const spec = specRef.current;
+      const scope = scopeRef.current;
+      if (viz && spec) {
+        const g = spec.getContext("2d");
+        if (g) {
+          const w = spec.width;
+          const h = spec.height;
+          g.clearRect(0, 0, w, h);
+          g.fillStyle = "#140c18";
+          g.fillRect(0, 0, w, h);
+          const bins = viz.spectrum;
+          const nyquist = Math.max(1000, viz.rate / 2);
+          const logX = (hz: number) => {
+            const min = Math.log(20);
+            const max = Math.log(Math.min(20000, nyquist));
+            return ((Math.log(Math.min(Math.max(20, hz), nyquist)) - min) / (max - min)) * w;
+          };
+          if (bins.length) {
+            const bars = 64;
+            const binHz = nyquist / bins.length;
+            g.fillStyle = "#3ec6ff";
+            for (let i = 0; i < bars; i++) {
+              const hz = 20 * (Math.min(20000, nyquist) / 20) ** (i / (bars - 1));
+              const idx = Math.min(bins.length - 1, Math.round(hz / binHz));
+              const mag = bins[idx]! / 255;
+              const x = logX(hz);
+              const bw = Math.max(2, w / bars - 1);
+              g.fillRect(x, h - mag * (h - 8), bw, mag * (h - 8));
+            }
+          }
+          g.beginPath();
+          g.strokeStyle = viz.eqOn ? "#c6e35a" : "#6a6458";
+          g.lineWidth = 2;
+          viz.freq.forEach((hz, i) => {
+            const db = Math.max(-18, Math.min(18, 20 * Math.log10(Math.max(1e-4, viz.eq[i]!))));
+            const x = logX(hz);
+            const y = h * 0.5 - (db / 18) * (h * 0.45);
+            if (i === 0) g.moveTo(x, y);
+            else g.lineTo(x, y);
+          });
+          g.stroke();
+        }
+      }
+      if (viz && scope) {
+        const g = scope.getContext("2d");
+        if (g) {
+          const w = scope.width;
+          const h = scope.height;
+          g.fillStyle = "#140c18";
+          g.fillRect(0, 0, w, h);
+          g.strokeStyle = "#ff5a68";
+          g.beginPath();
+          const step = ditherPeak(viz.dither);
+          viz.dither.forEach((s, i) => {
+            const x = (i / Math.max(1, viz.dither.length - 1)) * w;
+            const y = h * 0.5 - (s / step) * (h * 0.4);
+            if (i === 0) g.moveTo(x, y);
+            else g.lineTo(x, y);
+          });
+          g.stroke();
+        }
+      }
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [tab, hud?.menu]);
 
   useEffect(() => {
     try {
@@ -624,6 +824,9 @@ function Home() {
                 <button className={tab === "graphics" ? "choice on" : "choice"} type="button" onClick={() => setTab("graphics")}>
                   Graphics
                 </button>
+                <button className={tab === "sound" ? "choice on" : "choice"} type="button" onClick={() => setTab("sound")}>
+                  Sound
+                </button>
                 <button className={tab === "help" ? "choice on" : "choice"} type="button" onClick={() => setTab("help")}>
                   Help
                 </button>
@@ -672,6 +875,232 @@ function Home() {
                   <button className="btn" type="button" onClick={() => gameRef.current?.toggleSpectate()}>
                     <Eye size={16} /> {hud.spectate ? "Back to pilot" : "Spectate"}
                   </button>
+                </div>
+              ) : null}
+              {tab === "sound" ? (
+                <div>
+                  <div className="desk-nav">
+                    <button className={desk === "mix" ? "pill on" : "pill"} type="button" onClick={() => setDesk("mix")}>Mix</button>
+                    <button className={desk === "tone" ? "pill on" : "pill"} type="button" onClick={() => setDesk("tone")}>Tone</button>
+                    <button className={desk === "out" ? "pill on" : "pill"} type="button" onClick={() => setDesk("out")}>Output</button>
+                  </div>
+                  {desk === "mix" ? (
+                    <div className="mixer">
+                      {["World", "Announce", "You"].map((name, index) => {
+                        const s = strips[index]!;
+                        return (
+                          <div className="strip" key={name}>
+                            <strong>{name}</strong>
+                            <label>
+                              Pan {s.pan === 0 ? "C" : s.pan < 0 ? `L ${Math.abs(s.pan).toFixed(2)}` : `R ${s.pan.toFixed(2)}`}
+                              <input aria-label={`${name} pan`} type="range" min={-1} max={1} step={0.01} value={s.pan} onChange={(e) => patchStrip(index, { pan: Number(e.target.value) })} onDoubleClick={() => patchStrip(index, { pan: 0 })} />
+                            </label>
+                            <label>
+                              Trim {s.trim.toFixed(1)}
+                              <input aria-label={`${name} trim`} type="range" min={-12} max={12} step={0.1} value={s.trim} onChange={(e) => patchStrip(index, { trim: Number(e.target.value) })} onDoubleClick={() => patchStrip(index, { trim: 0 })} />
+                            </label>
+                            <label>
+                              HPF {s.hpf < 25 ? "off" : `${Math.round(s.hpf)}`}
+                              <input aria-label={`${name} high pass`} type="range" min={20} max={400} step={1} value={s.hpf} onChange={(e) => patchStrip(index, { hpf: Number(e.target.value) })} onDoubleClick={() => patchStrip(index, { hpf: 20 })} />
+                            </label>
+                            <label>
+                              Aux {Math.round(s.aux * 100)}
+                              <input aria-label={`${name} aux`} type="range" min={0} max={1} step={0.01} value={s.aux} onChange={(e) => patchStrip(index, { aux: Number(e.target.value) })} onDoubleClick={() => patchStrip(index, { aux: 0 })} />
+                            </label>
+                            <div className="strip-btns">
+                              <button className={s.mute ? "pill danger on" : "pill"} type="button" onClick={() => patchStrip(index, { mute: !s.mute })}>Mute</button>
+                              <button className={s.solo ? "pill solo on" : "pill"} type="button" onClick={() => patchStrip(index, { solo: !s.solo })}>Solo</button>
+                              <button className={s.pfl ? "pill on" : "pill"} type="button" onClick={() => patchStrip(index, { pfl: !s.pfl })}>PFL</button>
+                              <button className={s.pre ? "pill on" : "pill"} type="button" onClick={() => patchStrip(index, { pre: !s.pre })}>{s.pre ? "Pre" : "Post"}</button>
+                              <button className={s.pol ? "pill on" : "pill"} type="button" onClick={() => patchStrip(index, { pol: !s.pol })}>Phase</button>
+                            </div>
+                            <div className="strip-body">
+                              <input className="fader" aria-label={`${name} fader`} type="range" min={-60} max={12} step={0.1} value={s.fader} onChange={(e) => patchStrip(index, { fader: Number(e.target.value) })} onDoubleClick={() => patchStrip(index, { fader: 0 })} />
+                              <div className="meter" aria-hidden="true">
+                                <i ref={(el) => { meterRefs.current[index] = el; }} />
+                                <b ref={(el) => { holdRefs.current[index] = el; }} />
+                              </div>
+                            </div>
+                            <div className="strip-read">{s.fader <= -60 ? "-inf" : s.fader.toFixed(1)} dB</div>
+                          </div>
+                        );
+                      })}
+                      <div className="strip master">
+                        <strong>Master</strong>
+                        <VolumeKnob db={masterDb} onChange={setMaster} />
+                        <button className={masterMute ? "pill danger on" : "pill"} type="button" onClick={toggleMasterMute}>
+                          {masterMute ? "Muted" : "Mute"}
+                        </button>
+                        <button className={eqOn ? "pill on" : "pill"} type="button" onClick={toggleEq}>
+                          {eqOn ? "EQ on" : "EQ off"}
+                        </button>
+                        <label>
+                          Low {eq.low.toFixed(1)}
+                          <input aria-label="Master low shelf" type="range" min={-12} max={12} step={0.1} value={eq.low} onChange={(e) => setEqBand({ low: Number(e.target.value) })} onDoubleClick={() => setEqBand({ low: 0 })} />
+                          <span className="strip-read" ref={(el) => { eqRead.current[0] = el; }} />
+                        </label>
+                        <label>
+                          Low mid {eq.lowMid.toFixed(1)}
+                          <input aria-label="Master low mid" type="range" min={-12} max={12} step={0.1} value={eq.lowMid} onChange={(e) => setEqBand({ lowMid: Number(e.target.value) })} onDoubleClick={() => setEqBand({ lowMid: 0 })} />
+                          <span className="strip-read" ref={(el) => { eqRead.current[1] = el; }} />
+                        </label>
+                        <label>
+                          Mid {eq.mid.toFixed(1)}
+                          <input aria-label="Master mid" type="range" min={-12} max={12} step={0.1} value={eq.mid} onChange={(e) => setEqBand({ mid: Number(e.target.value) })} onDoubleClick={() => setEqBand({ mid: 0 })} />
+                          <span className="strip-read" ref={(el) => { eqRead.current[2] = el; }} />
+                        </label>
+                        <label>
+                          High mid {eq.highMid.toFixed(1)}
+                          <input aria-label="Master high mid" type="range" min={-12} max={12} step={0.1} value={eq.highMid} onChange={(e) => setEqBand({ highMid: Number(e.target.value) })} onDoubleClick={() => setEqBand({ highMid: 0 })} />
+                          <span className="strip-read" ref={(el) => { eqRead.current[3] = el; }} />
+                        </label>
+                        <label>
+                          High {eq.high.toFixed(1)}
+                          <input aria-label="Master high shelf" type="range" min={-12} max={12} step={0.1} value={eq.high} onChange={(e) => setEqBand({ high: Number(e.target.value) })} onDoubleClick={() => setEqBand({ high: 0 })} />
+                          <span className="strip-read" ref={(el) => { eqRead.current[4] = el; }} />
+                        </label>
+                        <label>
+                          Duck {Math.round(duck * 100)}%
+                          <input aria-label="Announcer duck" type="range" min={0.1} max={1} step={0.01} value={duck} onChange={(e) => { const v = Number(e.target.value); setDuck(v); sendMix(strips, auxReturn, v); }} />
+                        </label>
+                        <label>
+                          Aux return {Math.round(auxReturn * 100)}
+                          <input aria-label="Aux return" type="range" min={0} max={1} step={0.01} value={auxReturn} onChange={(e) => { const v = Number(e.target.value); setAuxReturn(v); sendMix(strips, v, duck); }} />
+                        </label>
+                        <div className="strip-body">
+                          <input className="fader" aria-label="Master fader" type="range" min={-60} max={6} step={0.1} value={masterDb} onChange={(e) => setMaster(Number(e.target.value))} onDoubleClick={() => setMaster(-3.1)} />
+                          <div className="meter" aria-hidden="true">
+                            <i ref={(el) => { meterRefs.current[3] = el; }} />
+                            <b ref={(el) => { holdRefs.current[3] = el; }} />
+                          </div>
+                        </div>
+                        <div className="strip-read">{masterDb <= -60 ? "-inf" : masterDb.toFixed(1)} dB</div>
+                      </div>
+                    </div>
+                  ) : null}
+                  {desk === "tone" ? (
+                    <div>
+                      <canvas ref={specRef} className="studio-viz" width={640} height={160} />
+                      <p className="studio-note">The line is the measured response of the five filters, on a log frequency axis. It is flat while EQ is off. The settings stay put.</p>
+                      <div className="desk-grid">
+                        <div className="desk-card">
+                          <h3>Equaliser</h3>
+                          <label className="field">
+                            Low shelf Hz
+                            <input type="range" min={40} max={240} step={1} value={eq.hz} onChange={(e) => setEqBand({ hz: Number(e.target.value) })} />
+                          </label>
+                          <label className="field">
+                            Low shelf dB
+                            <input type="range" min={-12} max={12} step={0.1} value={eq.low} onChange={(e) => setEqBand({ low: Number(e.target.value) })} />
+                          </label>
+                          <label className="field">
+                            Low mid dB
+                            <input type="range" min={-12} max={12} step={0.1} value={eq.lowMid} onChange={(e) => setEqBand({ lowMid: Number(e.target.value) })} />
+                          </label>
+                          <label className="field">
+                            Mid dB
+                            <input type="range" min={-12} max={12} step={0.1} value={eq.mid} onChange={(e) => setEqBand({ mid: Number(e.target.value) })} />
+                          </label>
+                          <label className="field">
+                            High mid dB
+                            <input type="range" min={-12} max={12} step={0.1} value={eq.highMid} onChange={(e) => setEqBand({ highMid: Number(e.target.value) })} />
+                          </label>
+                          <label className="field">
+                            High shelf dB
+                            <input type="range" min={-12} max={12} step={0.1} value={eq.high} onChange={(e) => setEqBand({ high: Number(e.target.value) })} />
+                          </label>
+                        </div>
+                        <div className="desk-card">
+                          <h3>Bass phat</h3>
+                          <label className="field">
+                            Frequency
+                            <input type="range" min={40} max={180} step={1} defaultValue={90} onChange={(e) => gameRef.current?.setStudio({ phatFreq: Number(e.target.value) })} />
+                          </label>
+                          <label className="field">
+                            Drive
+                            <input type="range" min={0} max={1} step={0.01} defaultValue={0.4} onChange={(e) => gameRef.current?.setStudio({ phatDrive: Number(e.target.value) })} />
+                          </label>
+                          <label className="field">
+                            Mix
+                            <input type="range" min={0} max={1} step={0.01} defaultValue={0} onChange={(e) => gameRef.current?.setStudio({ phatMix: Number(e.target.value) })} />
+                          </label>
+                          <h3>Amp and air</h3>
+                          <label className="field">
+                            Amp drive
+                            <input type="range" min={0} max={1} step={0.01} defaultValue={0} onChange={(e) => gameRef.current?.setStudio({ ampDrive: Number(e.target.value) })} />
+                          </label>
+                          <label className="field">
+                            Air
+                            <input type="range" min={-6} max={8} step={0.1} defaultValue={0} onChange={(e) => gameRef.current?.setStudio({ air: Number(e.target.value) })} />
+                          </label>
+                          <label className="field">
+                            Width
+                            <input type="range" min={0} max={2} step={0.01} defaultValue={1} onChange={(e) => gameRef.current?.setStudio({ width: Number(e.target.value) })} />
+                          </label>
+                          <label className="field">
+                            Exciter
+                            <input type="range" min={0} max={1} step={0.01} defaultValue={0} onChange={(e) => gameRef.current?.setStudio({ exciter: Number(e.target.value) })} />
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                  {desk === "out" ? (
+                    <div className="desk-grid">
+                      <div className="desk-card">
+                        <h3>Loudness</h3>
+                        <label className="field">
+                          ReplayGain
+                          <select defaultValue="none" onChange={(e) => gameRef.current?.setStudio({ replay: e.target.value as "none" | "gain" | "prevent" })}>
+                            <option value="none">None</option>
+                            <option value="gain">Apply gain</option>
+                            <option value="prevent">Apply gain and prevent clipping</option>
+                          </select>
+                        </label>
+                        <label className="field">
+                          Preamp dB
+                          <input type="range" min={-12} max={12} step={0.1} defaultValue={0} onChange={(e) => gameRef.current?.setStudio({ preamp: Number(e.target.value) })} />
+                        </label>
+                        <label className="field">
+                          Target loudness dB
+                          <input type="range" min={-24} max={-6} step={0.1} defaultValue={-12} onChange={(e) => gameRef.current?.setStudio({ target: Number(e.target.value) })} />
+                        </label>
+                        <label className="field">
+                          Peak ceiling %
+                          <input type="range" min={20} max={100} step={1} defaultValue={50} onChange={(e) => gameRef.current?.setStudio({ peak: Number(e.target.value) })} />
+                        </label>
+                      </div>
+                      <div className="desk-card">
+                        <h3>Dither</h3>
+                        <canvas ref={scopeRef} className="dither-viz" width={640} height={80} />
+                        <label className="field">
+                          Shape
+                          <select defaultValue="tpdf" onChange={(e) => gameRef.current?.setDither({ shape: e.target.value as "off" | "rpdf" | "tpdf" | "floyd" })}>
+                            <option value="tpdf">Triangular</option>
+                            <option value="rpdf">Rectangular</option>
+                            <option value="floyd">Floyd-Steinberg</option>
+                            <option value="off">Off</option>
+                          </select>
+                        </label>
+                        <label className="field">
+                          Bits
+                          <select defaultValue="24" onChange={(e) => gameRef.current?.setDither({ bits: Number(e.target.value) as 16 | 24 | 32 })}>
+                            <option value="16">16</option>
+                            <option value="24">24</option>
+                            <option value="32">32</option>
+                          </select>
+                        </label>
+                        <label className="field">
+                          Amount
+                          <input type="range" min={0} max={2} step={0.01} defaultValue={1} onChange={(e) => gameRef.current?.setDither({ amount: Number(e.target.value) })} />
+                        </label>
+                        <label className="field">
+                          Noise shaping
+                          <input type="range" min={0} max={0.98} step={0.01} defaultValue={0} onChange={(e) => gameRef.current?.setDither({ shaping: Number(e.target.value) })} />
+                        </label>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
               {tab === "help" ? (

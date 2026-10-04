@@ -2,7 +2,7 @@ import { i as __toESM } from "../_runtime.mjs";
 import { b as require_jsx_runtime, q as require_react } from "../_libs/@tanstack/react-router+[...].mjs";
 import { n as TSS_SERVER_FUNCTION, r as getServerFnById, t as createServerFn } from "./ssr.mjs";
 import { a as Maximize2, c as Eye, i as Settings, o as Map$1, r as Terminal, s as List, t as X } from "../_libs/lucide-react.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/routes-ELR1h6HI.js
+//#region node_modules/.nitro/vite/services/ssr/assets/routes-Bg182hlX.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var __defProp = Object.defineProperty;
@@ -38,6 +38,9 @@ var pulseMount = createServerFn({ method: "POST" }).validator((input) => input).
 var bound = null;
 var chatFns = /* @__PURE__ */ new Set();
 var announceFns = /* @__PURE__ */ new Set();
+var rosterFns = /* @__PURE__ */ new Set();
+var afkFns = /* @__PURE__ */ new Set();
+var pingFns = /* @__PURE__ */ new Set();
 function bindRelay(next) {
 	bound?.close();
 	bound = next;
@@ -51,10 +54,28 @@ function sendRelayChat(text) {
 function sendRelayAnnounce(text) {
 	bound?.announce(text);
 }
-function onRelayAnnounce(fn) {
-	announceFns.add(fn);
+function onRelayRoster(fn) {
+	rosterFns.add(fn);
 	return () => {
-		announceFns.delete(fn);
+		rosterFns.delete(fn);
+	};
+}
+function sendRelayNop() {
+	bound?.nop();
+}
+function dropRelay() {
+	bound?.close();
+}
+function onRelayAfk(fn) {
+	afkFns.add(fn);
+	return () => {
+		afkFns.delete(fn);
+	};
+}
+function onRelayPings(fn) {
+	pingFns.add(fn);
+	return () => {
+		pingFns.delete(fn);
 	};
 }
 function onRelayChat(fn) {
@@ -78,8 +99,13 @@ function connectRelay(url) {
 		}
 		const waiters = /* @__PURE__ */ new Map();
 		let seq = 1;
+		let token = "";
 		let opened = false;
 		let openedHandle = null;
+		let markClosed = () => {};
+		const untilClose = new Promise((resolve) => {
+			markClosed = resolve;
+		});
 		const timer = window.setTimeout(() => {
 			if (!opened) {
 				sock.close();
@@ -105,7 +131,6 @@ function connectRelay(url) {
 		sock.addEventListener("open", () => {
 			opened = true;
 			window.clearTimeout(timer);
-			let token = "";
 			const handle = {
 				async join(nick, password, team, charId) {
 					const msg = await send("join", {
@@ -155,6 +180,13 @@ function connectRelay(url) {
 						text: clean
 					}));
 				},
+				nop() {
+					if (!token || sock.readyState !== WebSocket.OPEN) return;
+					send("nop", { token }).catch(() => {});
+				},
+				untilClose() {
+					return untilClose;
+				},
 				close() {
 					sock.close();
 				}
@@ -167,6 +199,28 @@ function connectRelay(url) {
 			try {
 				msg = JSON.parse(String(ev.data));
 			} catch {
+				return;
+			}
+			if (msg.op === "ping") {
+				if (sock.readyState === WebSocket.OPEN) sock.send(JSON.stringify({
+					op: "pong",
+					t: msg.t,
+					token
+				}));
+				return;
+			}
+			if (msg.op === "afk" && (msg.action === "spawn" || msg.action === "kill")) {
+				for (const fn of afkFns) fn(msg.action);
+				return;
+			}
+			if (msg.op === "pings" && Array.isArray(msg.rows)) {
+				const rows = msg.rows.slice(0, 1e3);
+				for (const fn of pingFns) fn(rows);
+				return;
+			}
+			if (msg.op === "roster" && Array.isArray(msg.pilots)) {
+				const pilots = msg.pilots;
+				for (const fn of rosterFns) fn(pilots);
 				return;
 			}
 			if (msg.op === "announce" && typeof msg.text === "string") {
@@ -196,6 +250,7 @@ function connectRelay(url) {
 			for (const waiter of waiters.values()) waiter.fail(/* @__PURE__ */ new Error("closed"));
 			waiters.clear();
 			if (bound === openedHandle) bound = null;
+			markClosed();
 		});
 	});
 }
@@ -330,8 +385,8 @@ var WEAPON_BY_ID = Object.fromEntries([
 var CHARACTERS = [
 	{
 		id: "angel",
-		name: "Seraph Doll",
-		blurb: "Petite white-haired angel. Wings, halo, hold jump to glide.",
+		name: "Sugoimeg",
+		blurb: "White angelic doll. Wings, halo, hold jump to glide. A hello to megqtxo.",
 		hair: 16774890,
 		cloth: 16774360,
 		skin: 16769220,
@@ -348,14 +403,14 @@ var CHARACTERS = [
 	},
 	{
 		id: "pickme",
-		name: "Bluebelle",
-		blurb: "Blue-haired spark. Speeds her squad and never stops cheering.",
+		name: "Dizzydezzy",
+		blurb: "Blue-haired doll. Speeds her squad and never stops spinning.",
 		hair: 3116287,
-		cloth: 16744120,
+		cloth: 8308991,
 		skin: 16765624,
-		style: "sport",
+		style: "doll",
 		ability: "aura",
-		abilityName: "Pick-me pulse",
+		abilityName: "Dizzy pulse",
 		weapons: [
 			"dual",
 			"plasma",
@@ -366,8 +421,8 @@ var CHARACTERS = [
 	},
 	{
 		id: "goth",
-		name: "Noir Nyx",
-		blurb: "Petite, straight black hair, long shadow dash.",
+		name: "Gothgirl",
+		blurb: "Straight black hair. Long shadow dash.",
 		hair: 1314328,
 		cloth: 3810384,
 		skin: 15978680,
@@ -384,14 +439,14 @@ var CHARACTERS = [
 	},
 	{
 		id: "bestie",
-		name: "Bestie Bea",
-		blurb: "The goth's best friend. Fast revive, shared heal, everybody happy.",
+		name: "PickMe",
+		blurb: "Pink-haired friend of the goth. Fast revive and a shared heal.",
 		hair: 16752324,
 		cloth: 16735123,
 		skin: 16765104,
 		style: "doll",
 		ability: "bestie",
-		abilityName: "Bestie pulse",
+		abilityName: "Pick-me pulse",
 		weapons: [
 			"plasma",
 			"laugh",
@@ -687,6 +742,150 @@ var CHARACTERS = [
 		],
 		jumps: 2,
 		voice: 500
+	},
+	{
+		id: "laile",
+		name: "Laile",
+		blurb: "Pink rambler. She keeps talking while she fights. A nod to the pink Barbie.",
+		hair: 16735912,
+		cloth: 16748232,
+		skin: 16765124,
+		style: "doll",
+		ability: "aura",
+		abilityName: "Rambler",
+		weapons: [
+			"plasma",
+			"laugh",
+			"melee"
+		],
+		jumps: 2,
+		voice: 520
+	},
+	{
+		id: "cloudy",
+		name: "Cloudy",
+		blurb: "Big-headed blonde. Flies, spills rainbows, and falls through the looking glass.",
+		hair: 16769162,
+		cloth: 4114175,
+		skin: 16769224,
+		style: "round",
+		ability: "bird",
+		abilityName: "Wonderflight",
+		weapons: [
+			"plasma",
+			"laugh",
+			"bounce"
+		],
+		jumps: 2,
+		voice: 640
+	},
+	{
+		id: "donnie",
+		name: "The Donald",
+		blurb: "Cartoon showman. Killstreaks become Winner calls. Twenty is god mode.",
+		hair: 15781984,
+		cloth: 1714795,
+		skin: 15773808,
+		style: "sport",
+		ability: "winner",
+		abilityName: "You're fired",
+		weapons: [
+			"plasma",
+			"rocket",
+			"melee"
+		],
+		jumps: 2,
+		voice: 180
+	},
+	{
+		id: "elon",
+		name: "The Elon",
+		blurb: "Throws a different car every time and will not stop selling it.",
+		hair: 7031346,
+		cloth: 1710618,
+		skin: 15780008,
+		style: "sport",
+		ability: "tesla",
+		abilityName: "Throw a car",
+		weapons: [
+			"rocket",
+			"plasma",
+			"melee"
+		],
+		jumps: 2,
+		voice: 240
+	},
+	{
+		id: "flux",
+		name: "Ensign Flux",
+		blurb: "Laser pistol. Boom. Fluxxed you right in the capaciter.",
+		hair: 13213802,
+		cloth: 13017434,
+		skin: 15782068,
+		style: "sport",
+		ability: "flux",
+		abilityName: "Flux pistol",
+		weapons: [
+			"plasma",
+			"sniper",
+			"knife"
+		],
+		jumps: 2,
+		voice: 360
+	},
+	{
+		id: "rock",
+		name: "The Rock",
+		blurb: "Most-followed movie star, 2026. Eyebrow, elbow, and a catchphrase you can smell.",
+		hair: 1708556,
+		cloth: 1710618,
+		skin: 13010520,
+		style: "sport",
+		ability: "elbow",
+		abilityName: "People's elbow",
+		weapons: [
+			"melee",
+			"rocket",
+			"plasma"
+		],
+		jumps: 2,
+		voice: 110
+	},
+	{
+		id: "zendaya",
+		name: "Zendaya",
+		blurb: "Most-followed actress, 2026. Spotlight, long curls, and a line that holds the hill.",
+		hair: 2757644,
+		cloth: 2059077,
+		skin: 12880482,
+		style: "doll",
+		ability: "spotlight",
+		abilityName: "Spotlight",
+		weapons: [
+			"plasma",
+			"sniper",
+			"laugh"
+		],
+		jumps: 2,
+		voice: 280
+	},
+	{
+		id: "jlo",
+		name: "JLo",
+		blurb: "Jenny from the block. Gets loud, dances the reload, and does not miss the drop.",
+		hair: 1707016,
+		cloth: 15119141,
+		skin: 13671018,
+		style: "sport",
+		ability: "loud",
+		abilityName: "Let's get loud",
+		weapons: [
+			"dual",
+			"plasma",
+			"laugh"
+		],
+		jumps: 2,
+		voice: 230
 	}
 ];
 var CHAR_BY_ID = Object.fromEntries(CHARACTERS.map((c) => [c.id, c]));
@@ -895,13 +1094,350 @@ var LINES = {
 	wall: "hup!",
 	water: "splish!",
 	land: "phew!",
-	down: "help!",
+	down: "oooowh!",
+	die: "aiaiai!",
 	sheep: "baaaa!",
 	yay: "jeehee!",
 	ride: "chuchu!",
 	puff: "whooo!",
 	groan: "graaah!"
 };
+var DYING = [
+	"oooowh!",
+	"wergh!",
+	"aiaiai!",
+	"owowow!",
+	"eep!"
+];
+var FLIGHT = {
+	angel: [
+		"joohoo!",
+		"joohoo halo!",
+		"joohoo up we go"
+	],
+	pickme: [
+		"joohoo dizzy!",
+		"joohoo spin!",
+		"joohoo!"
+	],
+	goth: [
+		"joohoo...",
+		"joohoo darkly",
+		"joohoo"
+	],
+	bestie: [
+		"joohoo bestie!",
+		"joohoo with me!",
+		"joohoo!"
+	],
+	puff: [
+		"joohoo puff!",
+		"joohoo float",
+		"joohoo!"
+	],
+	bunny: [
+		"joohoo hop!",
+		"joohoo bounce",
+		"joohoo!"
+	],
+	trips: [
+		"joohoo three!",
+		"joohoo mint",
+		"joohoo!"
+	],
+	boomer: [
+		"joohoo boom!",
+		"joohoo rocket",
+		"joohoo!"
+	],
+	buzz: [
+		"joohoo buzz!",
+		"joohoo hover",
+		"joohoo!"
+	],
+	lark: [
+		"joohoo bird!",
+		"joohoo flap",
+		"joohoo!"
+	],
+	pack: [
+		"joohoo pack!",
+		"joohoo thrust",
+		"joohoo!"
+	],
+	pin: [
+		"joohoo pin",
+		"joohoo rite",
+		"joohoo"
+	],
+	wrap: [
+		"joohoo wrap",
+		"joohoo linen",
+		"joohoo"
+	],
+	bone: [
+		"joohoo bones",
+		"joohoo",
+		"joohoo rattle"
+	],
+	glass: [
+		"joohoo steady",
+		"joohoo",
+		"joohoo lens"
+	],
+	twin: [
+		"joohoo twins!",
+		"joohoo!",
+		"joohoo both"
+	],
+	cinder: [
+		"joohoo spark!",
+		"joohoo fire",
+		"joohoo!"
+	],
+	bleat: [
+		"joohoo baa!",
+		"joohoo!",
+		"joohoo lamb"
+	],
+	blocky: [
+		"joohoo block!",
+		"joohoo!",
+		"joohoo build"
+	],
+	wallaby: [
+		"joohoo wall!",
+		"joohoo ride",
+		"joohoo!"
+	],
+	laile: [
+		"joohoo and another thing",
+		"joohoo wait listen",
+		"joohoo!"
+	],
+	cloudy: [
+		"joohoo curiouser",
+		"joohoo rainbow",
+		"joohoo!"
+	],
+	donnie: [
+		"joohoo tremendous",
+		"joohoo winner",
+		"joohoo!"
+	],
+	elon: [
+		"joohoo to mars",
+		"joohoo buy this",
+		"joohoo!"
+	],
+	flux: [
+		"joohoo flux",
+		"joohoo capaciter",
+		"joohoo!"
+	],
+	rock: [
+		"joohoo finally",
+		"can you smell it",
+		"joohoo bring it"
+	],
+	zendaya: [
+		"joohoo watch this",
+		"joohoo from oakland",
+		"joohoo!"
+	],
+	jlo: [
+		"joohoo get loud",
+		"joohoo on the block",
+		"joohoo!"
+	]
+};
+var CHATTER = {
+	angel: [
+		"the light likes you",
+		"wings stay polite",
+		"halo on",
+		"bless this flag"
+	],
+	pickme: [
+		"spin with me",
+		"blue hair don't care",
+		"dizzy but accurate",
+		"again again"
+	],
+	goth: [
+		"this hill is mine",
+		"don't smile",
+		"shadows first",
+		"how dreary and fun"
+	],
+	bestie: [
+		"I saved you a spot",
+		"pink team up",
+		"hold my soda",
+		"best friends score"
+	],
+	puff: [
+		"inhale the desert",
+		"so round so fast",
+		"floaties out",
+		"soft landing maybe"
+	],
+	bunny: [
+		"hop hop hop",
+		"the chain is the point",
+		"ears up",
+		"boing with intent"
+	],
+	trips: [
+		"third jump is a lifestyle",
+		"minty fresh air",
+		"one two three",
+		"leave them two"
+	],
+	boomer: [
+		"rockets solve stairs",
+		"count the boom",
+		"up is a direction",
+		"pardon the crater"
+	],
+	buzz: [
+		"drone out",
+		"I see you",
+		"buzz off kindly",
+		"hover tax"
+	],
+	lark: [
+		"the wind owes me",
+		"flap budget remains",
+		"sky is open",
+		"tweet no, fight yes"
+	],
+	pack: [
+		"thruster warm",
+		"backpack says yes",
+		"fuel is a feeling",
+		"hold jump, trust me"
+	],
+	pin: [
+		"the pin finds a friend",
+		"rise if you mean it",
+		"doll of the rite",
+		"careful, it listens"
+	],
+	wrap: [
+		"stay wrapped",
+		"linen holds",
+		"the quiet kind of tough",
+		"unwrap later"
+	],
+	bone: [
+		"bones, politely",
+		"the rattle is a greeting",
+		"slower, harder",
+		"mind the ribs"
+	],
+	glass: [
+		"breath out, then the shot",
+		"the lens doesn't lie",
+		"hold still",
+		"one clean look"
+	],
+	twin: [
+		"both barrels agree",
+		"left and right, same idea",
+		"crosshair date",
+		"twins don't miss twice"
+	],
+	cinder: [
+		"a little flame",
+		"toasty, not tragic",
+		"cone of cute",
+		"mind the eyebrows"
+	],
+	bleat: [
+		"baa with purpose",
+		"I come back",
+		"lamb out",
+		"pop then hop"
+	],
+	blocky: [
+		"pad here",
+		"wall there",
+		"the map can be improved",
+		"foreman on site"
+	],
+	wallaby: [
+		"the wall is a road",
+		"don't let go",
+		"ride it out",
+		"vertical is fine"
+	],
+	laile: [
+		"so basically what happened was",
+		"and then, wait, the good part",
+		"I am still talking",
+		"pink microphone on"
+	],
+	cloudy: [
+		"down the wrong rabbit",
+		"rainbows are tactical",
+		"my head arrived first",
+		"curiouser, fire"
+	],
+	donnie: [
+		"tremendous pilot",
+		"you're looking at a winner",
+		"the best jump",
+		"everybody says so"
+	],
+	elon: [
+		"the car is the argument",
+		"different model, same point",
+		"they see me rollin",
+		"mars can wait one flag"
+	],
+	flux: [
+		"fluxxed in the capaciter",
+		"laser says hello",
+		"boom, politely",
+		"ensign on the hill"
+	],
+	rock: [
+		"Can you smell what the Rock is cooking",
+		"Just bring it",
+		"Know your role",
+		"Finally the Rock has come back",
+		"If you smell what I am cooking"
+	],
+	zendaya: [
+		"Watch me",
+		"I am still that girl from Oakland",
+		"This is my light",
+		"I make the spotlight",
+		"Hold the hill with me"
+	],
+	jlo: [
+		"Let's get loud",
+		"Jenny from the block",
+		"Love don't cost a thing",
+		"I ain't going nowhere",
+		"On the six"
+	]
+};
+function spokenLine(charId, key) {
+	if (key === "die" || key === "down") return DYING[Math.floor(Math.random() * DYING.length)];
+	if (key === "jump" || key === "double" || key === "triple") {
+		const set = FLIGHT[charId] || ["joohoo!"];
+		return set[Math.floor(Math.random() * set.length)];
+	}
+	if (key === "idle") {
+		const set = CHATTER[charId] || ["jeehee!"];
+		return set[Math.floor(Math.random() * set.length)];
+	}
+	const own = CHATTER[charId];
+	if (own && key !== "help" && key !== "groan" && key !== "sheep" && Math.random() < .55) return own[Math.floor(Math.random() * own.length)];
+	return LINES[key] || key;
+}
 var routes_exports = /* @__PURE__ */ __exportAll({ component: () => Home });
 var REMEMBER = "mountdew.gate.v1";
 var REG = "mountdew.reg.v1";
@@ -918,6 +1454,49 @@ var SERVER_LABEL = [
 	"Fallback",
 	"Third"
 ];
+function ditherPeak(samples) {
+	let peak = 1e-8;
+	for (let i = 0; i < samples.length; i++) peak = Math.max(peak, Math.abs(samples[i]));
+	return peak;
+}
+function VolumeKnob({ db, onChange }) {
+	const drag = (0, import_react.useRef)(null);
+	const angle = -140 + (db + 60) / 66 * 280;
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+		className: "knob-wrap",
+		children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+			type: "button",
+			className: "knob",
+			role: "slider",
+			"aria-label": "Master volume",
+			"aria-valuemin": -60,
+			"aria-valuemax": 6,
+			"aria-valuenow": Math.round(db * 10) / 10,
+			style: { transform: `rotate(${angle}deg)` },
+			onPointerDown: (e) => {
+				e.currentTarget.setPointerCapture(e.pointerId);
+				drag.current = {
+					y: e.clientY,
+					db
+				};
+			},
+			onPointerMove: (e) => {
+				if (!drag.current) return;
+				const next = drag.current.db + (drag.current.y - e.clientY) * .18;
+				onChange(Math.max(-60, Math.min(6, Math.round(next * 10) / 10)));
+			},
+			onPointerUp: () => {
+				drag.current = null;
+			},
+			onDoubleClick: () => onChange(-3.1),
+			onKeyDown: (e) => {
+				if (e.key === "ArrowUp" || e.key === "ArrowRight") onChange(Math.min(6, Math.round((db + .5) * 10) / 10));
+				if (e.key === "ArrowDown" || e.key === "ArrowLeft") onChange(Math.max(-60, Math.round((db - .5) * 10) / 10));
+			},
+			children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {})
+		}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Volume" })]
+	});
+}
 var ASCII = ` __  __  ___  _   _ _   _ _____
 |  \\/  |/ _ \\| | | | \\ | |_   _|
 | |\\/| | | | | | | |  \\| | | |
@@ -928,6 +1507,7 @@ function Home() {
 	const viewRef = (0, import_react.useRef)(null);
 	const overlayRef = (0, import_react.useRef)(null);
 	const gameRef = (0, import_react.useRef)(null);
+	const linkStop = (0, import_react.useRef)(null);
 	const [nick, setNick] = (0, import_react.useState)("");
 	const [password, setPassword] = (0, import_react.useState)("");
 	const [relay, setRelay] = (0, import_react.useState)(SERVERS[0]);
@@ -952,8 +1532,186 @@ function Home() {
 		dash: false
 	});
 	const chatLogRef = (0, import_react.useRef)(null);
+	const specRef = (0, import_react.useRef)(null);
+	const scopeRef = (0, import_react.useRef)(null);
+	const meterRefs = (0, import_react.useRef)([]);
+	const holdRefs = (0, import_react.useRef)([]);
+	const eqRead = (0, import_react.useRef)([]);
+	const [strips, setStrips] = (0, import_react.useState)([
+		0,
+		1,
+		2
+	].map(() => ({
+		fader: 0,
+		pan: 0,
+		trim: 0,
+		hpf: 20,
+		aux: 0,
+		pre: false,
+		mute: false,
+		solo: false,
+		pfl: false,
+		pol: false
+	})));
+	const [auxReturn, setAuxReturn] = (0, import_react.useState)(0);
+	const [duck, setDuck] = (0, import_react.useState)(.42);
+	const [masterDb, setMasterDb] = (0, import_react.useState)(-3.1);
+	const [masterMute, setMasterMute] = (0, import_react.useState)(false);
+	const [eq, setEq] = (0, import_react.useState)({
+		hz: 100,
+		low: 0,
+		lowMid: 0,
+		mid: 0,
+		highMid: 0,
+		high: 0
+	});
+	const [eqOn, setEqOn] = (0, import_react.useState)(true);
+	const [desk, setDesk] = (0, import_react.useState)("mix");
+	function setMaster(db) {
+		setMasterDb(db);
+		if (!masterMute) gameRef.current?.setVolume(Math.max(0, Math.min(1, 10 ** (db / 20))));
+	}
+	function toggleMasterMute() {
+		const next = !masterMute;
+		setMasterMute(next);
+		gameRef.current?.setVolume(next ? 0 : Math.max(0, Math.min(1, 10 ** (masterDb / 20))));
+	}
+	function setEqBand(patch) {
+		const next = {
+			...eq,
+			...patch
+		};
+		setEq(next);
+		gameRef.current?.setStudio({
+			eq: [
+				{
+					f: next.hz,
+					g: next.low
+				},
+				{ g: next.lowMid },
+				{ g: next.mid },
+				{ g: next.highMid },
+				{ g: next.high }
+			],
+			eqOn
+		});
+	}
+	function toggleEq() {
+		const next = !eqOn;
+		setEqOn(next);
+		gameRef.current?.setStudio({ eqOn: next });
+	}
+	function sendMix(next = strips, aux = auxReturn, duckTo = duck) {
+		const lin = (db) => db <= -60 ? 0 : 10 ** (db / 20);
+		gameRef.current?.setMix({
+			ch: next.map((s) => ({
+				fader: lin(s.fader),
+				trim: lin(s.trim),
+				pan: s.pan,
+				mute: s.mute,
+				solo: s.solo,
+				pfl: s.pfl,
+				pol: s.pol ? -1 : 1,
+				hpf: s.hpf < 25 ? 0 : s.hpf,
+				aux: s.aux,
+				pre: s.pre
+			})),
+			auxReturn: aux,
+			duck: duckTo
+		});
+	}
+	function patchStrip(index, patch) {
+		const next = strips.map((s, i) => i === index ? {
+			...s,
+			...patch
+		} : s);
+		setStrips(next);
+		sendMix(next);
+	}
 	const chatInputRef = (0, import_react.useRef)(null);
 	const chatSeq = (0, import_react.useRef)(1);
+	(0, import_react.useEffect)(() => {
+		if (tab !== "sound" || !hud?.menu) return;
+		let raf = 0;
+		const loop = () => {
+			raf = requestAnimationFrame(loop);
+			const viz = gameRef.current?.getStudioViz();
+			const meters = gameRef.current?.getMeters();
+			if (viz?.centers) viz.centers.forEach((db, i) => {
+				const el = eqRead.current[i];
+				if (el) el.textContent = `${db >= 0 ? "+" : ""}${db.toFixed(1)} heard`;
+			});
+			if (meters) for (let i = 0; i < 4; i++) {
+				const bar = meterRefs.current[i];
+				const hold = holdRefs.current[i];
+				if (bar) bar.style.height = `${Math.min(100, meters.peak[i] * 140)}%`;
+				if (hold) hold.style.bottom = `${Math.min(98, meters.hold[i] * 140)}%`;
+			}
+			const spec = specRef.current;
+			const scope = scopeRef.current;
+			if (viz && spec) {
+				const g = spec.getContext("2d");
+				if (g) {
+					const w = spec.width;
+					const h = spec.height;
+					g.clearRect(0, 0, w, h);
+					g.fillStyle = "#140c18";
+					g.fillRect(0, 0, w, h);
+					const bins = viz.spectrum;
+					const nyquist = Math.max(1e3, viz.rate / 2);
+					const logX = (hz) => {
+						const min = Math.log(20);
+						const max = Math.log(Math.min(2e4, nyquist));
+						return (Math.log(Math.min(Math.max(20, hz), nyquist)) - min) / (max - min) * w;
+					};
+					if (bins.length) {
+						const bars = 64;
+						const binHz = nyquist / bins.length;
+						g.fillStyle = "#3ec6ff";
+						for (let i = 0; i < bars; i++) {
+							const hz = 20 * (Math.min(2e4, nyquist) / 20) ** (i / 63);
+							const mag = bins[Math.min(bins.length - 1, Math.round(hz / binHz))] / 255;
+							const x = logX(hz);
+							const bw = Math.max(2, w / bars - 1);
+							g.fillRect(x, h - mag * (h - 8), bw, mag * (h - 8));
+						}
+					}
+					g.beginPath();
+					g.strokeStyle = viz.eqOn ? "#c6e35a" : "#6a6458";
+					g.lineWidth = 2;
+					viz.freq.forEach((hz, i) => {
+						const db = Math.max(-18, Math.min(18, 20 * Math.log10(Math.max(1e-4, viz.eq[i]))));
+						const x = logX(hz);
+						const y = h * .5 - db / 18 * (h * .45);
+						if (i === 0) g.moveTo(x, y);
+						else g.lineTo(x, y);
+					});
+					g.stroke();
+				}
+			}
+			if (viz && scope) {
+				const g = scope.getContext("2d");
+				if (g) {
+					const w = scope.width;
+					const h = scope.height;
+					g.fillStyle = "#140c18";
+					g.fillRect(0, 0, w, h);
+					g.strokeStyle = "#ff5a68";
+					g.beginPath();
+					const step = ditherPeak(viz.dither);
+					viz.dither.forEach((s, i) => {
+						const x = i / Math.max(1, viz.dither.length - 1) * w;
+						const y = h * .5 - s / step * (h * .4);
+						if (i === 0) g.moveTo(x, y);
+						else g.lineTo(x, y);
+					});
+					g.stroke();
+				}
+			}
+		};
+		raf = requestAnimationFrame(loop);
+		return () => cancelAnimationFrame(raf);
+	}, [tab, hud?.menu]);
 	(0, import_react.useEffect)(() => {
 		try {
 			const raw = localStorage.getItem(REMEMBER);
@@ -982,13 +1740,14 @@ function Home() {
 		let dead = false;
 		let stop = () => {};
 		(async () => {
-			const mod = await import("./engine-BC8zf6Fg.mjs");
+			const mod = await import("./engine-BAhTozcF.mjs");
 			if (dead || !viewRef.current || !overlayRef.current) return;
 			const qa = new URLSearchParams(window.location.search).has("qa");
 			const game = mod.createGame(viewRef.current, overlayRef.current, { qa });
 			gameRef.current = game;
+			game.intro();
 			const savedGfx = localStorage.getItem(GFX);
-			if (savedGfx === "low" || savedGfx === "medium" || savedGfx === "high") game.setQuality(savedGfx);
+			if (savedGfx === "low" || savedGfx === "medium" || savedGfx === "high" || savedGfx === "ultra") game.setQuality(savedGfx);
 			stop = game.subscribe(() => setHud(game.getHud()));
 			setHud(game.getHud());
 			if (qa) enter(game, "PilotQA", "qatest", 0, "angel", true);
@@ -1007,8 +1766,14 @@ function Home() {
 			id: chatSeq.current++
 		}].slice(-40));
 	}), []);
-	(0, import_react.useEffect)(() => onRelayAnnounce((text) => {
-		gameRef.current?.pushAnnounce(text);
+	(0, import_react.useEffect)(() => onRelayRoster((pilots) => {
+		gameRef.current?.applyRoster(pilots);
+	}), []);
+	(0, import_react.useEffect)(() => onRelayPings((rows) => {
+		gameRef.current?.notePings(rows);
+	}), []);
+	(0, import_react.useEffect)(() => onRelayAfk((action) => {
+		gameRef.current?.applyAfk(action);
 	}), []);
 	(0, import_react.useEffect)(() => {
 		const el = chatLogRef.current;
@@ -1048,41 +1813,77 @@ function Home() {
 		const address = relay.trim();
 		if (address && !qa) {
 			const order = SERVERS.includes(address) ? [address, ...SERVERS.filter((url) => url !== address)] : [address];
-			let linked = false;
-			for (const url of order) try {
-				const link = await connectRelay(url);
-				const res = await link.join(clean, pass, teamId, hero);
-				if (!res.ok) {
-					link.close();
-					setError(res.error);
-					setBusy(false);
-					return;
+			linkStop.current?.();
+			let stopped = false;
+			let linkedOnce = false;
+			const stop = () => {
+				stopped = true;
+				bindRelay(null);
+			};
+			linkStop.current = stop;
+			let delay = 700;
+			while (!stopped) {
+				for (const url of order) {
+					if (stopped) return;
+					try {
+						const link = await connectRelay(url);
+						if (stopped) {
+							link.close();
+							return;
+						}
+						const res = await link.join(clean, pass, teamId, hero);
+						if (!res.ok) {
+							link.close();
+							if (/password|nickname|team|full/i.test(res.error)) {
+								setError(res.error);
+								setBusy(false);
+								stopped = true;
+								return;
+							}
+							continue;
+						}
+						bindRelay(link);
+						localStorage.setItem(RELAY, url);
+						localStorage.setItem(REMEMBER, JSON.stringify({
+							nick: clean,
+							password: pass,
+							team: teamId,
+							charId: hero
+						}));
+						setRelay(url);
+						setBoard(res.board);
+						if (!linkedOnce) {
+							game.deploy({
+								nick: res.profile.nick,
+								team: teamId,
+								charId: hero,
+								token: res.token,
+								xp: res.profile.xp,
+								qa
+							});
+							game.pushLine(url === SERVERS[0] ? "match server linked" : `linked ${url}`);
+							setPhase("play");
+							setError("");
+							setBusy(false);
+							linkedOnce = true;
+						} else {
+							game.setToken(res.token);
+							game.pushLine("link restored");
+						}
+						delay = 700;
+						await link.untilClose();
+						if (stopped) return;
+						break;
+					} catch {}
 				}
-				localStorage.setItem(RELAY, url);
-				localStorage.setItem(REMEMBER, JSON.stringify({
-					nick: clean,
-					password: pass,
-					team: teamId,
-					charId: hero
-				}));
-				bindRelay(link);
-				setRelay(url);
-				setBoard(res.board);
-				game.deploy({
-					nick: res.profile.nick,
-					team: teamId,
-					charId: hero,
-					token: res.token,
-					xp: res.profile.xp,
-					qa
-				});
-				game.pushLine(url === SERVERS[0] ? "match server linked" : `linked ${url}`);
-				setPhase("play");
-				linked = true;
-				break;
-			} catch {}
-			if (!linked) setError("None of the match servers answered. Clear the address to play in this browser.");
-			setBusy(false);
+				if (stopped) return;
+				if (!linkedOnce) {
+					setError("Still trying the match servers…");
+					setBusy(false);
+				} else game.pushLine("reconnecting");
+				await new Promise((r) => setTimeout(r, delay));
+				delay = Math.min(5e3, Math.round(delay * 1.5));
+			}
 			return;
 		}
 		if (!address) localStorage.removeItem(RELAY);
@@ -1191,6 +1992,7 @@ function Home() {
 			}),
 			phase === "login" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 				className: "login",
+				onPointerDown: () => gameRef.current?.intro(),
 				children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 					className: "site",
 					children: [
@@ -1244,14 +2046,30 @@ function Home() {
 										children: PUBLIC_SITE
 									}),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", { children: "Mount Dew" }),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("video", {
+										className: "launch",
+										src: "/game/launch.mp4",
+										autoPlay: true,
+										muted: true,
+										loop: true,
+										playsInline: true,
+										controls: true
+									}),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 										className: "lede",
 										children: "One desert. Three flags. A hill that pays if you hold it. The match stays up, and you can drop in from this page."
 									}),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
-										className: "cover",
-										src: "/og.jpg",
-										alt: "Mount Dew app cover"
+									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+										className: "posters",
+										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
+											className: "cover",
+											src: "/og.jpg",
+											alt: "Mount Dew app cover"
+										}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
+											className: "cast",
+											src: "/game/cast.jpg",
+											alt: "Seraph Doll, Bluebelle, Noir Nyx, and Bestie Bea in the desert"
+										})]
 									}),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 										className: "handle",
@@ -1297,25 +2115,29 @@ function Home() {
 										}, t.id))
 									}),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-										className: "chars",
+										className: "pilot-grid",
+										role: "listbox",
 										"aria-label": "Pilots",
 										children: CHARACTERS.map((c) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
-											className: charId === c.id ? "choice on" : "choice",
+											className: charId === c.id ? "champ on" : "champ",
 											onClick: () => setCharId(c.id),
 											type: "button",
-											children: [
-												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-													className: "swatch",
-													style: { background: `#${c.hair.toString(16).padStart(6, "0")}` }
-												}),
-												c.name,
-												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: c.abilityName })
-											]
+											"aria-pressed": charId === c.id,
+											children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
+												src: `/game/pilots/${c.id}.jpg`,
+												alt: ""
+											}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: c.name })]
 										}, c.id))
 									}),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-										className: "muted",
-										children: CHARACTERS.find((c) => c.id === charId)?.blurb
+									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+										className: "pilot-pick",
+										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
+											src: `/game/pilots/${charId}.jpg`,
+											alt: ""
+										}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: CHARACTERS.find((c) => c.id === charId)?.name }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+											className: "muted",
+											children: CHARACTERS.find((c) => c.id === charId)?.blurb
+										})] })]
 									}),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
 										className: "field",
@@ -1519,13 +2341,20 @@ function Home() {
 					}),
 					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 						className: "feed",
-						children: [hud.banner ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-							className: "banner",
-							children: hud.banner
-						}) : null, hud.feed.map((line) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-							style: { opacity: Math.max(.35, 1 - (hud.now - line.at) / 6e3) },
-							children: line.text
-						}, line.id))]
+						children: [
+							hud.banner ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+								className: "banner",
+								children: hud.banner
+							}) : null,
+							hud.heat > 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "heat",
+								children: ["HEATSTROKE", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("b", { children: Math.ceil(hud.heat) })]
+							}) : null,
+							hud.feed.map((line) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+								style: { opacity: Math.max(.35, 1 - (hud.now - line.at) / 6e3) },
+								children: line.text
+							}, line.id))
+						]
 					}),
 					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 						className: "bottombar",
@@ -1648,7 +2477,7 @@ function Home() {
 						className: "sheet",
 						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 							className: "topbar",
-							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", { children: "Scoreboard" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("h2", { children: ["Scoreboard · ", hud.rows.length] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
 								className: "icon-btn",
 								type: "button",
 								"aria-label": "Close scoreboard",
@@ -1668,6 +2497,15 @@ function Home() {
 										className: r.me ? "pilot me" : "pilot",
 										children: [
 											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+												className: `mark ${r.kind}`,
+												title: r.kind
+											}),
+											r.charId ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
+												className: "mini",
+												src: `/game/pilots/${r.charId}.jpg`,
+												alt: ""
+											}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "mini blank" }),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
 												className: "rank",
 												children: r.rank
 											}),
@@ -1678,9 +2516,12 @@ function Home() {
 												"/",
 												r.d
 											] }),
-											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: r.xp })
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+												className: "ms",
+												children: r.kind === "human" ? `${r.ping || "–"} ms` : r.kind
+											})
 										]
-									}, `${t.id}-${r.name}`))
+									}, `${t.id}-${r.kind}-${r.name}`))
 								})]
 							}, t.id))
 						})]
@@ -1729,6 +2570,12 @@ function Home() {
 										children: "Graphics"
 									}),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+										className: tab === "sound" ? "choice on" : "choice",
+										type: "button",
+										onClick: () => setTab("sound"),
+										children: "Sound"
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
 										className: tab === "help" ? "choice on" : "choice",
 										type: "button",
 										onClick: () => setTab("help"),
@@ -1748,7 +2595,8 @@ function Home() {
 									children: [
 										"low",
 										"medium",
-										"high"
+										"high",
+										"ultra"
 									].map((q) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
 										className: hud.graphics === q ? "choice on" : "choice",
 										type: "button",
@@ -1756,7 +2604,7 @@ function Home() {
 											localStorage.setItem(GFX, q);
 											gameRef.current?.setQuality(q);
 										},
-										children: [q === "low" ? "Low" : q === "medium" ? "Medium" : "High", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: q === "low" ? "Older laptop GPU" : q === "medium" ? "4 cores and up" : "Flagship GPU" })]
+										children: [q === "low" ? "Low" : q === "medium" ? "Medium" : q === "high" ? "High" : "Ultra", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: q === "low" ? "Older laptop GPU" : q === "medium" ? "4 cores and up" : q === "high" ? "Flagship GPU" : "Pencil shadows and ragdoll" })]
 									}, q))
 								}),
 								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
@@ -1798,6 +2646,658 @@ function Home() {
 									]
 								})
 							] }) : null,
+							tab === "sound" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+									className: "desk-nav",
+									children: [
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+											className: desk === "mix" ? "pill on" : "pill",
+											type: "button",
+											onClick: () => setDesk("mix"),
+											children: "Mix"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+											className: desk === "tone" ? "pill on" : "pill",
+											type: "button",
+											onClick: () => setDesk("tone"),
+											children: "Tone"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+											className: desk === "out" ? "pill on" : "pill",
+											type: "button",
+											onClick: () => setDesk("out"),
+											children: "Output"
+										})
+									]
+								}),
+								desk === "mix" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+									className: "mixer",
+									children: [[
+										"World",
+										"Announce",
+										"You"
+									].map((name, index) => {
+										const s = strips[index];
+										return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+											className: "strip",
+											children: [
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: name }),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { children: [
+													"Pan ",
+													s.pan === 0 ? "C" : s.pan < 0 ? `L ${Math.abs(s.pan).toFixed(2)}` : `R ${s.pan.toFixed(2)}`,
+													/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+														"aria-label": `${name} pan`,
+														type: "range",
+														min: -1,
+														max: 1,
+														step: .01,
+														value: s.pan,
+														onChange: (e) => patchStrip(index, { pan: Number(e.target.value) }),
+														onDoubleClick: () => patchStrip(index, { pan: 0 })
+													})
+												] }),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { children: [
+													"Trim ",
+													s.trim.toFixed(1),
+													/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+														"aria-label": `${name} trim`,
+														type: "range",
+														min: -12,
+														max: 12,
+														step: .1,
+														value: s.trim,
+														onChange: (e) => patchStrip(index, { trim: Number(e.target.value) }),
+														onDoubleClick: () => patchStrip(index, { trim: 0 })
+													})
+												] }),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { children: [
+													"HPF ",
+													s.hpf < 25 ? "off" : `${Math.round(s.hpf)}`,
+													/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+														"aria-label": `${name} high pass`,
+														type: "range",
+														min: 20,
+														max: 400,
+														step: 1,
+														value: s.hpf,
+														onChange: (e) => patchStrip(index, { hpf: Number(e.target.value) }),
+														onDoubleClick: () => patchStrip(index, { hpf: 20 })
+													})
+												] }),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { children: [
+													"Aux ",
+													Math.round(s.aux * 100),
+													/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+														"aria-label": `${name} aux`,
+														type: "range",
+														min: 0,
+														max: 1,
+														step: .01,
+														value: s.aux,
+														onChange: (e) => patchStrip(index, { aux: Number(e.target.value) }),
+														onDoubleClick: () => patchStrip(index, { aux: 0 })
+													})
+												] }),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+													className: "strip-btns",
+													children: [
+														/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+															className: s.mute ? "pill danger on" : "pill",
+															type: "button",
+															onClick: () => patchStrip(index, { mute: !s.mute }),
+															children: "Mute"
+														}),
+														/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+															className: s.solo ? "pill solo on" : "pill",
+															type: "button",
+															onClick: () => patchStrip(index, { solo: !s.solo }),
+															children: "Solo"
+														}),
+														/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+															className: s.pfl ? "pill on" : "pill",
+															type: "button",
+															onClick: () => patchStrip(index, { pfl: !s.pfl }),
+															children: "PFL"
+														}),
+														/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+															className: s.pre ? "pill on" : "pill",
+															type: "button",
+															onClick: () => patchStrip(index, { pre: !s.pre }),
+															children: s.pre ? "Pre" : "Post"
+														}),
+														/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+															className: s.pol ? "pill on" : "pill",
+															type: "button",
+															onClick: () => patchStrip(index, { pol: !s.pol }),
+															children: "Phase"
+														})
+													]
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+													className: "strip-body",
+													children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+														className: "fader",
+														"aria-label": `${name} fader`,
+														type: "range",
+														min: -60,
+														max: 12,
+														step: .1,
+														value: s.fader,
+														onChange: (e) => patchStrip(index, { fader: Number(e.target.value) }),
+														onDoubleClick: () => patchStrip(index, { fader: 0 })
+													}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+														className: "meter",
+														"aria-hidden": "true",
+														children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { ref: (el) => {
+															meterRefs.current[index] = el;
+														} }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("b", { ref: (el) => {
+															holdRefs.current[index] = el;
+														} })]
+													})]
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+													className: "strip-read",
+													children: [s.fader <= -60 ? "-inf" : s.fader.toFixed(1), " dB"]
+												})
+											]
+										}, name);
+									}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+										className: "strip master",
+										children: [
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Master" }),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)(VolumeKnob, {
+												db: masterDb,
+												onChange: setMaster
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+												className: masterMute ? "pill danger on" : "pill",
+												type: "button",
+												onClick: toggleMasterMute,
+												children: masterMute ? "Muted" : "Mute"
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+												className: eqOn ? "pill on" : "pill",
+												type: "button",
+												onClick: toggleEq,
+												children: eqOn ? "EQ on" : "EQ off"
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { children: [
+												"Low ",
+												eq.low.toFixed(1),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+													"aria-label": "Master low shelf",
+													type: "range",
+													min: -12,
+													max: 12,
+													step: .1,
+													value: eq.low,
+													onChange: (e) => setEqBand({ low: Number(e.target.value) }),
+													onDoubleClick: () => setEqBand({ low: 0 })
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+													className: "strip-read",
+													ref: (el) => {
+														eqRead.current[0] = el;
+													}
+												})
+											] }),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { children: [
+												"Low mid ",
+												eq.lowMid.toFixed(1),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+													"aria-label": "Master low mid",
+													type: "range",
+													min: -12,
+													max: 12,
+													step: .1,
+													value: eq.lowMid,
+													onChange: (e) => setEqBand({ lowMid: Number(e.target.value) }),
+													onDoubleClick: () => setEqBand({ lowMid: 0 })
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+													className: "strip-read",
+													ref: (el) => {
+														eqRead.current[1] = el;
+													}
+												})
+											] }),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { children: [
+												"Mid ",
+												eq.mid.toFixed(1),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+													"aria-label": "Master mid",
+													type: "range",
+													min: -12,
+													max: 12,
+													step: .1,
+													value: eq.mid,
+													onChange: (e) => setEqBand({ mid: Number(e.target.value) }),
+													onDoubleClick: () => setEqBand({ mid: 0 })
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+													className: "strip-read",
+													ref: (el) => {
+														eqRead.current[2] = el;
+													}
+												})
+											] }),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { children: [
+												"High mid ",
+												eq.highMid.toFixed(1),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+													"aria-label": "Master high mid",
+													type: "range",
+													min: -12,
+													max: 12,
+													step: .1,
+													value: eq.highMid,
+													onChange: (e) => setEqBand({ highMid: Number(e.target.value) }),
+													onDoubleClick: () => setEqBand({ highMid: 0 })
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+													className: "strip-read",
+													ref: (el) => {
+														eqRead.current[3] = el;
+													}
+												})
+											] }),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { children: [
+												"High ",
+												eq.high.toFixed(1),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+													"aria-label": "Master high shelf",
+													type: "range",
+													min: -12,
+													max: 12,
+													step: .1,
+													value: eq.high,
+													onChange: (e) => setEqBand({ high: Number(e.target.value) }),
+													onDoubleClick: () => setEqBand({ high: 0 })
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+													className: "strip-read",
+													ref: (el) => {
+														eqRead.current[4] = el;
+													}
+												})
+											] }),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { children: [
+												"Duck ",
+												Math.round(duck * 100),
+												"%",
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+													"aria-label": "Announcer duck",
+													type: "range",
+													min: .1,
+													max: 1,
+													step: .01,
+													value: duck,
+													onChange: (e) => {
+														const v = Number(e.target.value);
+														setDuck(v);
+														sendMix(strips, auxReturn, v);
+													}
+												})
+											] }),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { children: [
+												"Aux return ",
+												Math.round(auxReturn * 100),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+													"aria-label": "Aux return",
+													type: "range",
+													min: 0,
+													max: 1,
+													step: .01,
+													value: auxReturn,
+													onChange: (e) => {
+														const v = Number(e.target.value);
+														setAuxReturn(v);
+														sendMix(strips, v, duck);
+													}
+												})
+											] }),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+												className: "strip-body",
+												children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+													className: "fader",
+													"aria-label": "Master fader",
+													type: "range",
+													min: -60,
+													max: 6,
+													step: .1,
+													value: masterDb,
+													onChange: (e) => setMaster(Number(e.target.value)),
+													onDoubleClick: () => setMaster(-3.1)
+												}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+													className: "meter",
+													"aria-hidden": "true",
+													children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { ref: (el) => {
+														meterRefs.current[3] = el;
+													} }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("b", { ref: (el) => {
+														holdRefs.current[3] = el;
+													} })]
+												})]
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+												className: "strip-read",
+												children: [masterDb <= -60 ? "-inf" : masterDb.toFixed(1), " dB"]
+											})
+										]
+									})]
+								}) : null,
+								desk === "tone" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("canvas", {
+										ref: specRef,
+										className: "studio-viz",
+										width: 640,
+										height: 160
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+										className: "studio-note",
+										children: "The line is the measured response of the five filters, on a log frequency axis. It is flat while EQ is off. The settings stay put."
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+										className: "desk-grid",
+										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+											className: "desk-card",
+											children: [
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", { children: "Equaliser" }),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+													className: "field",
+													children: ["Low shelf Hz", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+														type: "range",
+														min: 40,
+														max: 240,
+														step: 1,
+														value: eq.hz,
+														onChange: (e) => setEqBand({ hz: Number(e.target.value) })
+													})]
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+													className: "field",
+													children: ["Low shelf dB", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+														type: "range",
+														min: -12,
+														max: 12,
+														step: .1,
+														value: eq.low,
+														onChange: (e) => setEqBand({ low: Number(e.target.value) })
+													})]
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+													className: "field",
+													children: ["Low mid dB", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+														type: "range",
+														min: -12,
+														max: 12,
+														step: .1,
+														value: eq.lowMid,
+														onChange: (e) => setEqBand({ lowMid: Number(e.target.value) })
+													})]
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+													className: "field",
+													children: ["Mid dB", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+														type: "range",
+														min: -12,
+														max: 12,
+														step: .1,
+														value: eq.mid,
+														onChange: (e) => setEqBand({ mid: Number(e.target.value) })
+													})]
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+													className: "field",
+													children: ["High mid dB", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+														type: "range",
+														min: -12,
+														max: 12,
+														step: .1,
+														value: eq.highMid,
+														onChange: (e) => setEqBand({ highMid: Number(e.target.value) })
+													})]
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+													className: "field",
+													children: ["High shelf dB", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+														type: "range",
+														min: -12,
+														max: 12,
+														step: .1,
+														value: eq.high,
+														onChange: (e) => setEqBand({ high: Number(e.target.value) })
+													})]
+												})
+											]
+										}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+											className: "desk-card",
+											children: [
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", { children: "Bass phat" }),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+													className: "field",
+													children: ["Frequency", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+														type: "range",
+														min: 40,
+														max: 180,
+														step: 1,
+														defaultValue: 90,
+														onChange: (e) => gameRef.current?.setStudio({ phatFreq: Number(e.target.value) })
+													})]
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+													className: "field",
+													children: ["Drive", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+														type: "range",
+														min: 0,
+														max: 1,
+														step: .01,
+														defaultValue: .4,
+														onChange: (e) => gameRef.current?.setStudio({ phatDrive: Number(e.target.value) })
+													})]
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+													className: "field",
+													children: ["Mix", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+														type: "range",
+														min: 0,
+														max: 1,
+														step: .01,
+														defaultValue: 0,
+														onChange: (e) => gameRef.current?.setStudio({ phatMix: Number(e.target.value) })
+													})]
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", { children: "Amp and air" }),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+													className: "field",
+													children: ["Amp drive", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+														type: "range",
+														min: 0,
+														max: 1,
+														step: .01,
+														defaultValue: 0,
+														onChange: (e) => gameRef.current?.setStudio({ ampDrive: Number(e.target.value) })
+													})]
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+													className: "field",
+													children: ["Air", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+														type: "range",
+														min: -6,
+														max: 8,
+														step: .1,
+														defaultValue: 0,
+														onChange: (e) => gameRef.current?.setStudio({ air: Number(e.target.value) })
+													})]
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+													className: "field",
+													children: ["Width", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+														type: "range",
+														min: 0,
+														max: 2,
+														step: .01,
+														defaultValue: 1,
+														onChange: (e) => gameRef.current?.setStudio({ width: Number(e.target.value) })
+													})]
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+													className: "field",
+													children: ["Exciter", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+														type: "range",
+														min: 0,
+														max: 1,
+														step: .01,
+														defaultValue: 0,
+														onChange: (e) => gameRef.current?.setStudio({ exciter: Number(e.target.value) })
+													})]
+												})
+											]
+										})]
+									})
+								] }) : null,
+								desk === "out" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+									className: "desk-grid",
+									children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+										className: "desk-card",
+										children: [
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", { children: "Loudness" }),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+												className: "field",
+												children: ["ReplayGain", /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", {
+													defaultValue: "none",
+													onChange: (e) => gameRef.current?.setStudio({ replay: e.target.value }),
+													children: [
+														/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+															value: "none",
+															children: "None"
+														}),
+														/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+															value: "gain",
+															children: "Apply gain"
+														}),
+														/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+															value: "prevent",
+															children: "Apply gain and prevent clipping"
+														})
+													]
+												})]
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+												className: "field",
+												children: ["Preamp dB", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+													type: "range",
+													min: -12,
+													max: 12,
+													step: .1,
+													defaultValue: 0,
+													onChange: (e) => gameRef.current?.setStudio({ preamp: Number(e.target.value) })
+												})]
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+												className: "field",
+												children: ["Target loudness dB", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+													type: "range",
+													min: -24,
+													max: -6,
+													step: .1,
+													defaultValue: -12,
+													onChange: (e) => gameRef.current?.setStudio({ target: Number(e.target.value) })
+												})]
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+												className: "field",
+												children: ["Peak ceiling %", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+													type: "range",
+													min: 20,
+													max: 100,
+													step: 1,
+													defaultValue: 50,
+													onChange: (e) => gameRef.current?.setStudio({ peak: Number(e.target.value) })
+												})]
+											})
+										]
+									}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+										className: "desk-card",
+										children: [
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", { children: "Dither" }),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("canvas", {
+												ref: scopeRef,
+												className: "dither-viz",
+												width: 640,
+												height: 80
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+												className: "field",
+												children: ["Shape", /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", {
+													defaultValue: "tpdf",
+													onChange: (e) => gameRef.current?.setDither({ shape: e.target.value }),
+													children: [
+														/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+															value: "tpdf",
+															children: "Triangular"
+														}),
+														/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+															value: "rpdf",
+															children: "Rectangular"
+														}),
+														/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+															value: "floyd",
+															children: "Floyd-Steinberg"
+														}),
+														/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+															value: "off",
+															children: "Off"
+														})
+													]
+												})]
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+												className: "field",
+												children: ["Bits", /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", {
+													defaultValue: "24",
+													onChange: (e) => gameRef.current?.setDither({ bits: Number(e.target.value) }),
+													children: [
+														/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+															value: "16",
+															children: "16"
+														}),
+														/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+															value: "24",
+															children: "24"
+														}),
+														/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+															value: "32",
+															children: "32"
+														})
+													]
+												})]
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+												className: "field",
+												children: ["Amount", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+													type: "range",
+													min: 0,
+													max: 2,
+													step: .01,
+													defaultValue: 1,
+													onChange: (e) => gameRef.current?.setDither({ amount: Number(e.target.value) })
+												})]
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+												className: "field",
+												children: ["Noise shaping", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+													type: "range",
+													min: 0,
+													max: .98,
+													step: .01,
+													defaultValue: 0,
+													onChange: (e) => gameRef.current?.setDither({ shaping: Number(e.target.value) })
+												})]
+											})
+										]
+									})]
+								}) : null
+							] }) : null,
 							tab === "help" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 								className: "help-grid",
 								children: [
@@ -1833,10 +3333,17 @@ function Home() {
 								children: "MADE BY DAN"
 							})] }) : null,
 							tab === "about" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
-									className: "cover",
-									src: "/og.jpg",
-									alt: "Mount Dew app cover"
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+									className: "posters",
+									children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
+										className: "cover",
+										src: "/og.jpg",
+										alt: "Mount Dew app cover"
+									}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
+										className: "cast",
+										src: "/game/cast.jpg",
+										alt: "Seraph Doll, Bluebelle, Noir Nyx, and Bestie Bea in the desert"
+									})]
 								}),
 								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 									className: "handle",
@@ -1953,4 +3460,4 @@ function readReg() {
 	}
 }
 //#endregion
-export { CHAR_BY_ID as a, WEAPON_BY_ID as c, netPulse as d, sendRelayAnnounce as f, CHARACTERS as i, rankForLevel as l, BOT_NAMES as n, LINES as o, BUILD_ACTIONS as r, TEAMS as s, routes_exports as t, xpToLevel as u };
+export { CHAR_BY_ID as a, rankForLevel as c, dropRelay as d, netPulse as f, CHARACTERS as i, spokenLine as l, sendRelayNop as m, BOT_NAMES as n, TEAMS as o, sendRelayAnnounce as p, BUILD_ACTIONS as r, WEAPON_BY_ID as s, routes_exports as t, xpToLevel as u };

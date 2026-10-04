@@ -4,6 +4,13 @@
 * SPDX-License-Identifier: MIT
 */
 /**
+* The skinned mesh shares the same world space as the skeleton.
+*
+* @type {string}
+* @constant
+*/
+var AttachedBindMode = "attached";
+/**
 * The texture will simply repeat to infinity.
 *
 * @type {number}
@@ -15318,6 +15325,254 @@ function checkGeometryIntersection(object, material, raycaster, ray, uv, uv1, no
 	}
 	return intersection;
 }
+var _baseVector = /*@__PURE__*/ new Vector4();
+var _skinIndex = /*@__PURE__*/ new Vector4();
+var _skinWeight = /*@__PURE__*/ new Vector4();
+var _vector4 = /*@__PURE__*/ new Vector4();
+var _matrix4 = /*@__PURE__*/ new Matrix4();
+var _vertex = /*@__PURE__*/ new Vector3();
+var _sphere$5 = /*@__PURE__*/ new Sphere();
+var _inverseMatrix$2 = /*@__PURE__*/ new Matrix4();
+var _ray$2 = /*@__PURE__*/ new Ray();
+/**
+* A mesh that has a {@link Skeleton} that can then be used to animate the
+* vertices of the geometry with skinning/skeleton animation.
+*
+* Next to a valid skeleton, the skinned mesh requires skin indices and weights
+* as buffer attributes in its geometry. These attribute define which bones affect a single
+* vertex to a certain extend.
+*
+* Typically skinned meshes are not created manually but loaders like {@link GLTFLoader}
+* or {@link FBXLoader } import respective models.
+*
+* @augments Mesh
+* @demo scenes/bones-browser.html
+*/
+var SkinnedMesh = class extends Mesh {
+	/**
+	* Constructs a new skinned mesh.
+	*
+	* @param {BufferGeometry} [geometry] - The mesh geometry.
+	* @param {Material|Array<Material>} [material] - The mesh material.
+	*/
+	constructor(geometry, material) {
+		super(geometry, material);
+		/**
+		* This flag can be used for type testing.
+		*
+		* @type {boolean}
+		* @readonly
+		* @default true
+		*/
+		this.isSkinnedMesh = true;
+		this.type = "SkinnedMesh";
+		/**
+		* `AttachedBindMode` means the skinned mesh shares the same world space as the skeleton.
+		* This is not true when using `DetachedBindMode` which is useful when sharing a skeleton
+		* across multiple skinned meshes.
+		*
+		* @type {(AttachedBindMode|DetachedBindMode)}
+		* @default AttachedBindMode
+		*/
+		this.bindMode = AttachedBindMode;
+		/**
+		* The base matrix that is used for the bound bone transforms.
+		*
+		* @type {Matrix4}
+		*/
+		this.bindMatrix = new Matrix4();
+		/**
+		* The base matrix that is used for resetting the bound bone transforms.
+		*
+		* @type {Matrix4}
+		*/
+		this.bindMatrixInverse = new Matrix4();
+		/**
+		* The bounding box of the skinned mesh. Can be computed via {@link SkinnedMesh#computeBoundingBox}.
+		*
+		* @type {?Box3}
+		* @default null
+		*/
+		this.boundingBox = null;
+		/**
+		* The bounding sphere of the skinned mesh. Can be computed via {@link SkinnedMesh#computeBoundingSphere}.
+		*
+		* @type {?Sphere}
+		* @default null
+		*/
+		this.boundingSphere = null;
+	}
+	/**
+	* Computes the bounding box of the skinned mesh, and updates {@link SkinnedMesh#boundingBox}.
+	* The bounding box is not automatically computed by the engine; this method must be called by your app.
+	* If the skinned mesh is animated, the bounding box should be recomputed per frame in order to reflect
+	* the current animation state.
+	*/
+	computeBoundingBox() {
+		const geometry = this.geometry;
+		if (this.boundingBox === null) this.boundingBox = new Box3();
+		this.boundingBox.makeEmpty();
+		const positionAttribute = geometry.getAttribute("position");
+		for (let i = 0; i < positionAttribute.count; i++) {
+			this.getVertexPosition(i, _vertex);
+			this.boundingBox.expandByPoint(_vertex);
+		}
+	}
+	/**
+	* Computes the bounding sphere of the skinned mesh, and updates {@link SkinnedMesh#boundingSphere}.
+	* The bounding sphere is automatically computed by the engine once when it is needed, e.g., for ray casting
+	* and view frustum culling. If the skinned mesh is animated, the bounding sphere should be recomputed
+	* per frame in order to reflect the current animation state.
+	*/
+	computeBoundingSphere() {
+		const geometry = this.geometry;
+		if (this.boundingSphere === null) this.boundingSphere = new Sphere();
+		this.boundingSphere.makeEmpty();
+		const positionAttribute = geometry.getAttribute("position");
+		for (let i = 0; i < positionAttribute.count; i++) {
+			this.getVertexPosition(i, _vertex);
+			this.boundingSphere.expandByPoint(_vertex);
+		}
+	}
+	copy(source, recursive) {
+		super.copy(source, recursive);
+		this.bindMode = source.bindMode;
+		this.bindMatrix.copy(source.bindMatrix);
+		this.bindMatrixInverse.copy(source.bindMatrixInverse);
+		this.skeleton = source.skeleton;
+		if (source.boundingBox !== null) this.boundingBox = source.boundingBox.clone();
+		if (source.boundingSphere !== null) this.boundingSphere = source.boundingSphere.clone();
+		return this;
+	}
+	raycast(raycaster, intersects) {
+		const material = this.material;
+		const matrixWorld = this.matrixWorld;
+		if (material === void 0) return;
+		if (this.boundingSphere === null) this.computeBoundingSphere();
+		_sphere$5.copy(this.boundingSphere);
+		_sphere$5.applyMatrix4(matrixWorld);
+		if (raycaster.ray.intersectsSphere(_sphere$5) === false) return;
+		_inverseMatrix$2.copy(matrixWorld).invert();
+		_ray$2.copy(raycaster.ray).applyMatrix4(_inverseMatrix$2);
+		if (this.boundingBox !== null) {
+			if (_ray$2.intersectsBox(this.boundingBox) === false) return;
+		}
+		this._computeIntersections(raycaster, intersects, _ray$2);
+	}
+	getVertexPosition(index, target) {
+		super.getVertexPosition(index, target);
+		this.applyBoneTransform(index, target);
+		return target;
+	}
+	/**
+	* Binds the given skeleton to the skinned mesh.
+	*
+	* @param {Skeleton} skeleton - The skeleton to bind.
+	* @param {Matrix4} [bindMatrix] - The bind matrix. If no bind matrix is provided,
+	* the skinned mesh's world matrix will be used instead.
+	*/
+	bind(skeleton, bindMatrix) {
+		this.skeleton = skeleton;
+		if (bindMatrix === void 0) {
+			this.updateMatrixWorld(true);
+			this.skeleton.calculateInverses();
+			bindMatrix = this.matrixWorld;
+		}
+		this.bindMatrix.copy(bindMatrix);
+		this.bindMatrixInverse.copy(bindMatrix).invert();
+	}
+	/**
+	* This method sets the skinned mesh in the rest pose).
+	*/
+	pose() {
+		this.skeleton.pose();
+	}
+	/**
+	* Normalizes the skin weights which are defined as a buffer attribute
+	* in the skinned mesh's geometry.
+	*/
+	normalizeSkinWeights() {
+		const vector = new Vector4();
+		const skinWeight = this.geometry.attributes.skinWeight;
+		for (let i = 0, l = skinWeight.count; i < l; i++) {
+			vector.fromBufferAttribute(skinWeight, i);
+			const scale = 1 / vector.manhattanLength();
+			if (scale !== Infinity) vector.multiplyScalar(scale);
+			else vector.set(1, 0, 0, 0);
+			skinWeight.setXYZW(i, vector.x, vector.y, vector.z, vector.w);
+		}
+	}
+	updateMatrixWorld(force) {
+		super.updateMatrixWorld(force);
+		if (this.bindMode === "attached") this.bindMatrixInverse.copy(this.matrixWorld).invert();
+		else if (this.bindMode === "detached") this.bindMatrixInverse.copy(this.bindMatrix).invert();
+		else warn("SkinnedMesh: Unrecognized bindMode: " + this.bindMode);
+	}
+	/**
+	* Applies the bone transform associated with the given index to the given
+	* vector. Can be used to transform positions or direction vectors by providing
+	* a Vector4 with 1 or 0 in the w component respectively. Returns the updated vector.
+	*
+	* @param {number} index - The vertex index.
+	* @param {Vector3|Vector4} target - The target object that is used to store the method's result.
+	* @return {Vector3|Vector4} The updated vertex attribute data.
+	*/
+	applyBoneTransform(index, target) {
+		const skeleton = this.skeleton;
+		const geometry = this.geometry;
+		_skinIndex.fromBufferAttribute(geometry.attributes.skinIndex, index);
+		_skinWeight.fromBufferAttribute(geometry.attributes.skinWeight, index);
+		if (target.isVector4) {
+			_baseVector.copy(target);
+			target.set(0, 0, 0, 0);
+		} else {
+			_baseVector.set(...target, 1);
+			target.set(0, 0, 0);
+		}
+		_baseVector.applyMatrix4(this.bindMatrix);
+		for (let i = 0; i < 4; i++) {
+			const weight = _skinWeight.getComponent(i);
+			if (weight !== 0) {
+				const boneIndex = _skinIndex.getComponent(i);
+				_matrix4.multiplyMatrices(skeleton.bones[boneIndex].matrixWorld, skeleton.boneInverses[boneIndex]);
+				target.addScaledVector(_vector4.copy(_baseVector).applyMatrix4(_matrix4), weight);
+			}
+		}
+		if (target.isVector4) target.w = _baseVector.w;
+		return target.applyMatrix4(this.bindMatrixInverse);
+	}
+};
+/**
+* A bone which is part of a {@link Skeleton}. The skeleton in turn is used by
+* the {@link SkinnedMesh}.
+*
+* ```js
+* const root = new THREE.Bone();
+* const child = new THREE.Bone();
+*
+* root.add( child );
+* child.position.y = 5;
+* ```
+*
+* @augments Object3D
+*/
+var Bone = class extends Object3D {
+	/**
+	* Constructs a new bone.
+	*/
+	constructor() {
+		super();
+		/**
+		* This flag can be used for type testing.
+		*
+		* @type {boolean}
+		* @readonly
+		* @default true
+		*/
+		this.isBone = true;
+		this.type = "Bone";
+	}
+};
 /**
 * Creates a texture directly from raw buffer data.
 *
@@ -15393,6 +15648,231 @@ var DataTexture = class extends Texture {
 		* @default 1
 		*/
 		this.unpackAlignment = 1;
+	}
+};
+var _offsetMatrix = /*@__PURE__*/ new Matrix4();
+var _identityMatrix = /*@__PURE__*/ new Matrix4();
+/**
+* Class for representing the armatures in `three.js`. The skeleton
+* is defined by a hierarchy of bones.
+*
+* ```js
+* const bones = [];
+*
+* const shoulder = new THREE.Bone();
+* const elbow = new THREE.Bone();
+* const hand = new THREE.Bone();
+*
+* shoulder.add( elbow );
+* elbow.add( hand );
+*
+* bones.push( shoulder , elbow, hand);
+*
+* shoulder.position.y = -5;
+* elbow.position.y = 0;
+* hand.position.y = 5;
+*
+* const armSkeleton = new THREE.Skeleton( bones );
+* ```
+*/
+var Skeleton = class Skeleton {
+	/**
+	* Constructs a new skeleton.
+	*
+	* @param {Array<Bone>} [bones] - An array of bones.
+	* @param {Array<Matrix4>} [boneInverses] - An array of bone inverse matrices.
+	* If not provided, these matrices will be computed automatically via {@link Skeleton#calculateInverses}.
+	*/
+	constructor(bones = [], boneInverses = []) {
+		this.uuid = generateUUID();
+		/**
+		* An array of bones defining the skeleton.
+		*
+		* @type {Array<Bone>}
+		*/
+		this.bones = bones.slice(0);
+		/**
+		* An array of bone inverse matrices.
+		*
+		* @type {Array<Matrix4>}
+		*/
+		this.boneInverses = boneInverses;
+		/**
+		* An array buffer holding the bone data.
+		* Input data for {@link Skeleton#boneTexture}.
+		*
+		* @type {?Float32Array}
+		* @default null
+		*/
+		this.boneMatrices = null;
+		/**
+		* A texture holding the bone data for use
+		* in the vertex shader.
+		*
+		* @type {?DataTexture}
+		* @default null
+		*/
+		this.boneTexture = null;
+		this.init();
+	}
+	/**
+	* Initializes the skeleton. This method gets automatically called by the constructor
+	* but depending on how the skeleton is created it might be necessary to call this method
+	* manually.
+	*/
+	init() {
+		const bones = this.bones;
+		const boneInverses = this.boneInverses;
+		this.boneMatrices = new Float32Array(bones.length * 16);
+		if (boneInverses.length === 0) this.calculateInverses();
+		else if (bones.length !== boneInverses.length) {
+			warn("Skeleton: Number of inverse bone matrices does not match amount of bones.");
+			this.boneInverses = [];
+			for (let i = 0, il = this.bones.length; i < il; i++) this.boneInverses.push(new Matrix4());
+		}
+	}
+	/**
+	* Computes the bone inverse matrices. This method resets {@link Skeleton#boneInverses}
+	* and fills it with new matrices.
+	*/
+	calculateInverses() {
+		this.boneInverses.length = 0;
+		for (let i = 0, il = this.bones.length; i < il; i++) {
+			const inverse = new Matrix4();
+			if (this.bones[i]) inverse.copy(this.bones[i].matrixWorld).invert();
+			this.boneInverses.push(inverse);
+		}
+	}
+	/**
+	* Resets the skeleton to the base pose.
+	*/
+	pose() {
+		for (let i = 0, il = this.bones.length; i < il; i++) {
+			const bone = this.bones[i];
+			if (bone) bone.matrixWorld.copy(this.boneInverses[i]).invert();
+		}
+		for (let i = 0, il = this.bones.length; i < il; i++) {
+			const bone = this.bones[i];
+			if (bone) {
+				if (bone.parent && bone.parent.isBone) {
+					bone.matrix.copy(bone.parent.matrixWorld).invert();
+					bone.matrix.multiply(bone.matrixWorld);
+				} else bone.matrix.copy(bone.matrixWorld);
+				bone.matrix.decompose(bone.position, bone.quaternion, bone.scale);
+			}
+		}
+	}
+	/**
+	* Resets the skeleton to the base pose.
+	*/
+	update() {
+		const bones = this.bones;
+		const boneInverses = this.boneInverses;
+		const boneMatrices = this.boneMatrices;
+		const boneTexture = this.boneTexture;
+		for (let i = 0, il = bones.length; i < il; i++) {
+			const matrix = bones[i] ? bones[i].matrixWorld : _identityMatrix;
+			_offsetMatrix.multiplyMatrices(matrix, boneInverses[i]);
+			_offsetMatrix.toArray(boneMatrices, i * 16);
+		}
+		if (boneTexture !== null) boneTexture.needsUpdate = true;
+	}
+	/**
+	* Returns a new skeleton with copied values from this instance.
+	*
+	* @return {Skeleton} A clone of this instance.
+	*/
+	clone() {
+		return new Skeleton(this.bones, this.boneInverses);
+	}
+	/**
+	* Computes a data texture for passing bone data to the vertex shader.
+	*
+	* @return {Skeleton} A reference of this instance.
+	*/
+	computeBoneTexture() {
+		let size = Math.sqrt(this.bones.length * 4);
+		size = Math.ceil(size / 4) * 4;
+		size = Math.max(size, 4);
+		const boneMatrices = new Float32Array(size * size * 4);
+		boneMatrices.set(this.boneMatrices);
+		const boneTexture = new DataTexture(boneMatrices, size, size, RGBAFormat, FloatType);
+		boneTexture.needsUpdate = true;
+		this.boneMatrices = boneMatrices;
+		this.boneTexture = boneTexture;
+		return this;
+	}
+	/**
+	* Searches through the skeleton's bone array and returns the first with a
+	* matching name.
+	*
+	* @param {string} name - The name of the bone.
+	* @return {Bone|undefined} The found bone. `undefined` if no bone has been found.
+	*/
+	getBoneByName(name) {
+		for (let i = 0, il = this.bones.length; i < il; i++) {
+			const bone = this.bones[i];
+			if (bone.name === name) return bone;
+		}
+	}
+	/**
+	* Frees the GPU-related resources allocated by this instance. Call this
+	* method whenever this instance is no longer used in your app.
+	*/
+	dispose() {
+		if (this.boneTexture !== null) {
+			this.boneTexture.dispose();
+			this.boneTexture = null;
+		}
+	}
+	/**
+	* Setups the skeleton by the given JSON and bones.
+	*
+	* @param {Object} json - The skeleton as serialized JSON.
+	* @param {Object<string, Bone>} bones - An array of bones.
+	* @return {Skeleton} A reference of this instance.
+	*/
+	fromJSON(json, bones) {
+		this.uuid = json.uuid;
+		for (let i = 0, l = json.bones.length; i < l; i++) {
+			const uuid = json.bones[i];
+			let bone = bones[uuid];
+			if (bone === void 0) {
+				warn("Skeleton: No bone found with UUID:", uuid);
+				bone = new Bone();
+			}
+			this.bones.push(bone);
+			this.boneInverses.push(new Matrix4().fromArray(json.boneInverses[i]));
+		}
+		this.init();
+		return this;
+	}
+	/**
+	* Serializes the skeleton into JSON.
+	*
+	* @return {Object} A JSON object representing the serialized skeleton.
+	* @see {@link ObjectLoader#parse}
+	*/
+	toJSON() {
+		const data = {
+			metadata: {
+				version: 4.7,
+				type: "Skeleton",
+				generator: "Skeleton.toJSON"
+			},
+			bones: [],
+			boneInverses: []
+		};
+		data.uuid = this.uuid;
+		const bones = this.bones;
+		const boneInverses = this.boneInverses;
+		for (let i = 0, l = bones.length; i < l; i++) {
+			const bone = bones[i];
+			data.bones.push(bone.uuid);
+			const boneInverse = boneInverses[i];
+			data.boneInverses.push(boneInverse.toArray());
+		}
+		return data;
 	}
 };
 /**
@@ -18821,6 +19301,306 @@ var MeshPhongMaterial = class extends Material {
 		this.wireframeLinecap = source.wireframeLinecap;
 		this.wireframeLinejoin = source.wireframeLinejoin;
 		this.flatShading = source.flatShading;
+		this.fog = source.fog;
+		return this;
+	}
+};
+/**
+* A material implementing toon shading.
+*
+* @augments Material
+* @demo scenes/material-browser.html#MeshToonMaterial
+*/
+var MeshToonMaterial = class extends Material {
+	/**
+	* Constructs a new mesh toon material.
+	*
+	* @param {Object} [parameters] - An object with one or more properties
+	* defining the material's appearance. Any property of the material
+	* (including any property from inherited materials) can be passed
+	* in here. Color values can be passed any type of value accepted
+	* by {@link Color#set}.
+	*/
+	constructor(parameters) {
+		super();
+		/**
+		* This flag can be used for type testing.
+		*
+		* @type {boolean}
+		* @readonly
+		* @default true
+		*/
+		this.isMeshToonMaterial = true;
+		this.defines = { "TOON": "" };
+		this.type = "MeshToonMaterial";
+		/**
+		* Color of the material.
+		*
+		* @type {Color}
+		* @default (1,1,1)
+		*/
+		this.color = new Color(16777215);
+		/**
+		* The color map. May optionally include an alpha channel, typically combined
+		* with {@link Material#transparent} or {@link Material#alphaTest}. The texture map
+		* color is modulated by the diffuse `color`.
+		*
+		* `map` represents color data, and the texture must be assigned a
+		* {@link Texture#colorSpace}. Most `map` textures set
+		* `texture.colorSpace = SRGBColorSpace`.
+		*
+		* @type {?Texture}
+		* @default null
+		*/
+		this.map = null;
+		/**
+		* Gradient map for toon shading. It's required to set
+		* {@link Texture#minFilter} and {@link Texture#magFilter} to {@link NearestFilter}
+		* when using this type of texture.
+		*
+		* `gradientMap` represents non-color data. Any texture assigned must have
+		* `texture.colorSpace = NoColorSpace` (default).
+		*
+		* @type {?Texture}
+		* @default null
+		*/
+		this.gradientMap = null;
+		/**
+		* The light map. Requires a second set of UVs.
+		*
+		* `lightMap` represents pre-baked illuminance data, and the texture must be assigned
+		* a {@link Texture#colorSpace}. Most `lightMap` textures set
+		* `texture.colorSpace = LinearSRGBColorSpace` and use float-type formats
+		* such as `.exr` or `.hdr`.
+		*
+		* @type {?Texture}
+		* @default null
+		*/
+		this.lightMap = null;
+		/**
+		* Intensity of the baked light.
+		*
+		* @type {number}
+		* @default 1
+		*/
+		this.lightMapIntensity = 1;
+		/**
+		* The red channel of this texture is used as the ambient occlusion map.
+		* Requires a second set of UVs.
+		*
+		* `aoMap` represents non-color data. Any texture assigned must have
+		* `texture.colorSpace = NoColorSpace` (default).
+		*
+		* @type {?Texture}
+		* @default null
+		*/
+		this.aoMap = null;
+		/**
+		* Intensity of the ambient occlusion effect. Range is `[0,1]`, where `0`
+		* disables ambient occlusion. Where intensity is `1` and the AO map's
+		* red channel is also `1`, ambient light is fully occluded on a surface.
+		*
+		* @type {number}
+		* @default 1
+		*/
+		this.aoMapIntensity = 1;
+		/**
+		* Emissive (light) color of the material, essentially a solid color
+		* unaffected by other lighting.
+		*
+		* @type {Color}
+		* @default (0,0,0)
+		*/
+		this.emissive = new Color(0);
+		/**
+		* Intensity of the emissive light. Modulates the emissive color.
+		*
+		* @type {number}
+		* @default 1
+		*/
+		this.emissiveIntensity = 1;
+		/**
+		* Set emissive (glow) map. The emissive map color is modulated by the
+		* emissive color and the emissive intensity. If you have an emissive map,
+		* be sure to set the emissive color to something other than black.
+		*
+		* `emissiveMap` represents color data, and the texture must be assigned a
+		* {@link Texture#colorSpace}. Most `emissiveMap` textures set
+		* `texture.colorSpace = SRGBColorSpace`.
+		*
+		* @type {?Texture}
+		* @default null
+		*/
+		this.emissiveMap = null;
+		/**
+		* The texture to create a bump map. The black and white values map to the
+		* perceived depth in relation to the lights. Bump doesn't actually affect
+		* the geometry of the object, only the lighting. If a normal map is defined
+		* this will be ignored.
+		*
+		* `bumpMap` represents non-color data. Any texture assigned must have
+		* `texture.colorSpace = NoColorSpace` (default).
+		*
+		* @type {?Texture}
+		* @default null
+		*/
+		this.bumpMap = null;
+		/**
+		* How much the bump map affects the material. Typical range is `[0,1]`.
+		*
+		* @type {number}
+		* @default 1
+		*/
+		this.bumpScale = 1;
+		/**
+		* The texture to create a normal map. The RGB values affect the surface
+		* normal for each pixel fragment and change the way the color is lit. Normal
+		* maps do not change the actual shape of the surface, only the lighting. In
+		* case the material has a normal map authored using the left handed
+		* convention, the `y` component of `normalScale` should be negated to compensate
+		* for the different handedness.
+		*
+		* `normalMap` represents non-color data. Any texture assigned must have
+		* `texture.colorSpace = NoColorSpace` (default).
+		*
+		* @type {?Texture}
+		* @default null
+		*/
+		this.normalMap = null;
+		/**
+		* The type of normal map.
+		*
+		* @type {(TangentSpaceNormalMap|ObjectSpaceNormalMap)}
+		* @default TangentSpaceNormalMap
+		*/
+		this.normalMapType = 0;
+		/**
+		* How much the normal map affects the material. Typical value range is `[0,1]`.
+		*
+		* @type {Vector2}
+		* @default (1,1)
+		*/
+		this.normalScale = new Vector2(1, 1);
+		/**
+		* The displacement map affects the position of the mesh's vertices. Unlike
+		* other maps which only affect the light and shade of the material the
+		* displaced vertices can cast shadows, block other objects, and otherwise
+		* act as real geometry. The displacement texture is an image where the value
+		* of each pixel (white being the highest) is mapped against, and
+		* repositions, the vertices of the mesh. For best results, pair a
+		* displacement map with a matching normal map, since the renderer can
+		* not recompute surface normals from the displaced vertices.
+		*
+		* `displacementMap` represents non-color data. Any texture assigned must have
+		* `texture.colorSpace = NoColorSpace` (default).
+		*
+		* @type {?Texture}
+		* @default null
+		*/
+		this.displacementMap = null;
+		/**
+		* How much the displacement map affects the mesh (where black is no
+		* displacement, and white is maximum displacement). Without a displacement
+		* map set, this value is not applied.
+		*
+		* @type {number}
+		* @default 0
+		*/
+		this.displacementScale = 1;
+		/**
+		* The offset of the displacement map's values on the mesh's vertices.
+		* The bias is added to the scaled sample of the displacement map.
+		* Without a displacement map set, this value is not applied.
+		*
+		* @type {number}
+		* @default 0
+		*/
+		this.displacementBias = 0;
+		/**
+		* The alpha map is a grayscale texture that controls the opacity across the
+		* surface (black: fully transparent; white: fully opaque).
+		*
+		* Only the color of the texture is used, ignoring the alpha channel if one
+		* exists. For RGB and RGBA textures, the renderer will use the green channel
+		* when sampling this texture due to the extra bit of precision provided for
+		* green in DXT-compressed and uncompressed RGB 565 formats. Luminance-only and
+		* luminance/alpha textures will also still work as expected.
+		*
+		* `alphaMap` represents non-color data. Any texture assigned must have
+		* `texture.colorSpace = NoColorSpace` (default).
+		*
+		* @type {?Texture}
+		* @default null
+		*/
+		this.alphaMap = null;
+		/**
+		* Renders the geometry as a wireframe.
+		*
+		* @type {boolean}
+		* @default false
+		*/
+		this.wireframe = false;
+		/**
+		* Controls the thickness of the wireframe.
+		*
+		* Can only be used with {@link SVGRenderer}.
+		*
+		* @type {number}
+		* @default 1
+		*/
+		this.wireframeLinewidth = 1;
+		/**
+		* Defines appearance of wireframe ends.
+		*
+		* Can only be used with {@link SVGRenderer}.
+		*
+		* @type {('round'|'bevel'|'miter')}
+		* @default 'round'
+		*/
+		this.wireframeLinecap = "round";
+		/**
+		* Defines appearance of wireframe joints.
+		*
+		* Can only be used with {@link SVGRenderer}.
+		*
+		* @type {('round'|'bevel'|'miter')}
+		* @default 'round'
+		*/
+		this.wireframeLinejoin = "round";
+		/**
+		* Whether the material is affected by fog or not.
+		*
+		* @type {boolean}
+		* @default true
+		*/
+		this.fog = true;
+		this.setValues(parameters);
+	}
+	copy(source) {
+		super.copy(source);
+		this.color.copy(source.color);
+		this.map = source.map;
+		this.gradientMap = source.gradientMap;
+		this.lightMap = source.lightMap;
+		this.lightMapIntensity = source.lightMapIntensity;
+		this.aoMap = source.aoMap;
+		this.aoMapIntensity = source.aoMapIntensity;
+		this.emissive.copy(source.emissive);
+		this.emissiveMap = source.emissiveMap;
+		this.emissiveIntensity = source.emissiveIntensity;
+		this.bumpMap = source.bumpMap;
+		this.bumpScale = source.bumpScale;
+		this.normalMap = source.normalMap;
+		this.normalMapType = source.normalMapType;
+		this.normalScale.copy(source.normalScale);
+		this.displacementMap = source.displacementMap;
+		this.displacementScale = source.displacementScale;
+		this.displacementBias = source.displacementBias;
+		this.alphaMap = source.alphaMap;
+		this.wireframe = source.wireframe;
+		this.wireframeLinewidth = source.wireframeLinewidth;
+		this.wireframeLinecap = source.wireframeLinecap;
+		this.wireframeLinejoin = source.wireframeLinejoin;
 		this.fog = source.fog;
 		return this;
 	}
@@ -33767,4 +34547,4 @@ var WebGLRenderer = class {
 	}
 };
 //#endregion
-export { PerspectiveCamera as A, TorusGeometry as B, MathUtils as C, MeshLambertMaterial as D, MeshBasicMaterial as E, RepeatWrapping as F, SRGBColorSpace as I, Scene as L, Points as M, PointsMaterial as N, MeshPhongMaterial as O, Quaternion as P, SphereGeometry as R, LineSegments as S, Mesh as T, Vector3 as V, Group as _, BufferGeometry as a, InstancedMesh as b, ClampToEdgeWrapping as c, CylinderGeometry as d, DirectionalLight as f, Fog as g, Float32BufferAttribute as h, BufferAttribute as i, PlaneGeometry as j, OctahedronGeometry as k, Color as l, Euler as m, AmbientLight as n, CanvasTexture as o, DodecahedronGeometry as p, BoxGeometry as r, CircleGeometry as s, WebGLRenderer as t, ConeGeometry as u, HemisphereLight as v, Matrix4 as w, LineBasicMaterial as x, InstancedBufferAttribute as y, Timer as z };
+export { MeshLambertMaterial as A, Quaternion as B, Line as C, Matrix4 as D, MathUtils as E, OctahedronGeometry as F, SkinnedMesh as G, SRGBColorSpace as H, PerspectiveCamera as I, TorusGeometry as J, SphereGeometry as K, PlaneGeometry as L, MeshToonMaterial as M, NearestFilter as N, Mesh as O, Object3D as P, Points as R, InstancedMesh as S, LineSegments as T, Scene as U, RepeatWrapping as V, Skeleton as W, Vector3 as X, Uint16BufferAttribute as Y, Float32BufferAttribute as _, BufferAttribute as a, HemisphereLight as b, CircleGeometry as c, ConeGeometry as d, CylinderGeometry as f, Euler as g, DodecahedronGeometry as h, BoxGeometry as i, MeshPhongMaterial as j, MeshBasicMaterial as k, ClampToEdgeWrapping as l, DirectionalLight as m, AmbientLight as n, BufferGeometry as o, DataTexture as p, Timer as q, Bone as r, CanvasTexture as s, WebGLRenderer as t, Color as u, Fog as v, LineBasicMaterial as w, InstancedBufferAttribute as x, Group as y, PointsMaterial as z };
