@@ -20,7 +20,7 @@ import http from "node:http";
 import https from "node:https";
 import net from "node:net";
 import { availableParallelism } from "node:os";
-import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { attachRelay, relayHealth } from "../relay/server.mjs";
@@ -88,6 +88,44 @@ function ensureBuild() {
   });
 }
 
+function patchDecoders() {
+  const bad = 'return decodeURI(pathname.includes("%25") ? pathname.replace(/%25/g, "%2525") : pathname);';
+  const good = 'try { return decodeURI(pathname.includes("%25") ? pathname.replace(/%25/g, "%2525") : pathname); } catch { return pathname; }';
+  const files = [];
+  const walk = (dir) => {
+    if (!existsSync(dir)) return;
+    for (const name of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, name.name);
+      if (name.isDirectory()) walk(full);
+      else if (/\.(mjs|js|cjs)$/.test(name.name)) files.push(full);
+    }
+  };
+  walk(join(root, "node_modules", "h3"));
+  walk(join(root, "node_modules", "h3-v2"));
+  walk(join(root, ".vercel", "output", "functions"));
+  for (const file of files) {
+    const text = readFileSync(file, "utf8");
+    if (!text.includes(bad)) continue;
+    writeFileSync(file, text.split(bad).join(good));
+  }
+}
+
+function pathIsSafe(url) {
+  const raw = url || "/";
+  const cut = raw.indexOf("?");
+  const path = cut === -1 ? raw : raw.slice(0, cut);
+  try {
+    decodeURI(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+let siteChild = null;
+let stopping = false;
+const siteCrashes = [];
+
 function startSite() {
   const child = runNode([
     join(root, "node_modules", "vite", "bin", "vite.js"),
@@ -98,23 +136,34 @@ function startSite() {
     String(APP_PORT),
     "--strictPort",
   ]);
-  const stop = () => {
-    if (!child.killed) child.kill("SIGTERM");
-  };
-  process.on("SIGINT", () => {
-    stop();
-    process.exit(0);
-  });
-  process.on("SIGTERM", () => {
-    stop();
-    process.exit(0);
-  });
+  siteChild = child;
   child.on("exit", (code) => {
+    if (siteChild === child) siteChild = null;
     siteUp = false;
-    if (code && code !== 0) {
+    if (stopping || !code) return;
+    const now = Date.now();
+    while (siteCrashes.length && now - siteCrashes[0] > 60000) siteCrashes.shift();
+    siteCrashes.push(now);
+    if (siteCrashes.length > 5) {
       bootNote = "The website process stopped. The match relay is still up. Restart node host/server.mjs.";
       console.error("Site process stopped.");
+      return;
     }
+    console.error("Site process stopped. Starting it again.");
+    setTimeout(() => {
+      if (stopping) return;
+      patchDecoders();
+      startSite();
+      waitForSite()
+        .then(() => {
+          siteUp = true;
+          console.log("Website is ready.");
+        })
+        .catch((err) => {
+          bootNote = err instanceof Error ? err.message : "The website did not start.";
+          console.error(bootNote);
+        });
+    }, 800);
   });
   return child;
 }
@@ -167,7 +216,9 @@ async function bootSite() {
       console.error("Then start again: node host/server.mjs");
       return;
     }
+    patchDecoders();
     await ensureBuild();
+    patchDecoders();
     startSite();
     await waitForSite();
     siteUp = true;
@@ -182,6 +233,11 @@ async function bootSite() {
 
 function onRequest(req, res) {
   const path = (req.url || "/").split("?")[0];
+  if (!pathIsSafe(req.url)) {
+    res.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
+    res.end("Bad request");
+    return;
+  }
   if (path === "/health") {
     res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
     res.end(JSON.stringify({ ...relayHealth(), site: siteUp }));
@@ -260,6 +316,16 @@ function openPort(port, secure) {
 }
 
 const secure = ensureCert();
+process.on("SIGINT", () => {
+  stopping = true;
+  if (siteChild && !siteChild.killed) siteChild.kill("SIGTERM");
+  process.exit(0);
+});
+process.on("SIGTERM", () => {
+  stopping = true;
+  if (siteChild && !siteChild.killed) siteChild.kill("SIGTERM");
+  process.exit(0);
+});
 const listeners = PORTS.map((port) => openPort(port, secure));
 setTimeout(() => {
   const opened = listeners.filter((tcp) => tcp.__open).map((tcp) => tcp.address().port);
